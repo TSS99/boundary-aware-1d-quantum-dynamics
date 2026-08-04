@@ -1,31 +1,88 @@
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Python
+# ---------------------------------------------------------------- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+*.egg
+*.egg-info/
+build/
+dist/
+sdist/
+wheels/
+pip-wheel-metadata/
+.Python
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# ----------------------------------------------------------- environments --
+.env
+.env.*
+!.env.example
+.venv
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
 
-# pytest
+# -------------------------------------------------------------- tooling ----
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pytype/
+.tox/
+.nox/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
+.hypothesis/
 
-# Editor/IDE
+# -------------------------------------------------------------- Jupyter ----
+.ipynb_checkpoints/
+.virtual_documents/
+# Local Jupyter state, created if notebooks are run through a wrapper script.
+.jupyter-runtime/
+.jupyter-data/
+.jupyter-config/
+.ipython/
+
+# --------------------------------------------------------------- results ---
+# Generated output. Regenerate with:
+#     python scripts/reproduce.py --profile paper
+# Provenance is recorded in results/<profile>/metadata/provenance.json, so these
+# files are reconstructible rather than primary sources.
+results/
+
+# ------------------------------------------------------------ editors/IDE --
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+*.bak
+*.tmp
+.claude/
 
-# MacOS
+# ------------------------------------------------------------------- OS ----
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+desktop.ini
+$RECYCLE.BIN/
+~$*
+*.lnk
+# macOS
 .DS_Store
+.AppleDouble
+._*
+# Linux
+.fuse_hidden*
+.nfs*
+
+# ------------------------------------------------------------------ misc ---
+*.log
+
+# graphify knowledge graph (generated tooling artefact, ~2 MB)
+# Rebuild with: /graphify  (or automatically via the post-commit hook)
+graphify-out/
+

@@ -1,3 +1,0 @@
-validation,n_qubits,direct_l2_error,phase_adjusted_l2_error,passed,grid_size
-qiskit_qft_matches_numpy_fft_step,6.0,9.903349126223873e-15,7.506341424816832e-15,True,
-dst_matrix_matches_scipy_sine_step,,4.148256692855813e-16,,True,64.0

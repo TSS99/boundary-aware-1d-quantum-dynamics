@@ -1,0 +1,92 @@
+# Fast profile for correctness checking, not for publication numbers.
+# Same physics as paper.yaml at reduced resolution so the whole workflow runs
+# in well under a minute.
+profile: smoke
+seed: 20240517
+output_root: results/smoke
+
+physics:
+  hbar: 1.0
+  mass: 1.0
+
+benchmarks:
+
+  harmonic:
+    omega: 1.0
+    domain:
+      boundary: periodic
+      n_grid: 32
+      x_left: -8.0
+      x_right: 8.0
+    initial_state:
+      centre: 2.0
+      momentum: 0.0
+      sigma: 1.0
+    time_grid:
+      t_max: 6.283185307179586
+      n_steps: 20
+      step_sweep: [10, 20, 40, 80]
+    grid_sweep: [16, 32, 64]
+    reference:
+      dense_grid_size: 1024
+      basis_cap: 64
+      tail_tolerance: 1.0e-10
+
+  infinite_well:
+    domain:
+      boundary: dirichlet
+      n_grid: 32
+      x_left: 0.0
+      x_right: 10.0
+    initial_state:
+      centre: 5.0
+      momentum: 2.0
+      sigma: 0.8
+      sine_window: true
+    time_grid:
+      t_max: 6.0
+      n_steps: 20
+      step_sweep: [10, 20, 40, 80]
+    grid_sweep: [16, 32, 64]
+    reference:
+      dense_grid_size: 1025
+      basis_cap: 128
+      tail_tolerance: 1.0e-10
+
+  tilted_well:
+    tilt_force: 5.0
+    domain:
+      boundary: dirichlet
+      n_grid: 32
+      x_left: 0.0
+      x_right: 10.0
+    initial_state:
+      centre: 5.0
+      momentum: 2.0
+      sigma: 0.8
+      sine_window: true
+    time_grid:
+      t_max: 2.0
+      n_steps: 80
+      step_sweep: [40, 80, 160, 320]
+    grid_sweep: [16, 32, 64]
+    reference:
+      dense_grid_size: 1025
+      basis_cap: 128
+      tail_tolerance: 1.0e-12
+
+circuits:
+  basis_gates: [rz, sx, x, cx]
+  optimisation_level: 3
+  coupling: all_to_all
+  seed: 20240517
+  approximation_degree: 0.0
+  validation_qubits: [2, 3]
+  validation_tolerance: 1.0e-10
+
+plotting:
+  mode: preview
+  dpi: 150
+  single_column_mm: 85.0
+  double_column_mm: 170.0
+  formats: [png]

@@ -1,6 +1,0 @@
-system,r,dt,final_time_fidelity,minimum_fidelity,mean_fidelity,single_step_1q_count,single_step_2q_count,single_step_depth,synthesis_model,total_1q_count,total_2q_count,total_gate_count,estimated_total_depth
-infinite_well,20,0.3,0.9999999999955058,0.9999999999955058,0.9999999999955088,214,198,193,Qiskit_transpiled_QST_proxy_with_QFT_extension,4280,3960,8240,3860
-infinite_well,40,0.15,0.9999999999954978,0.9999999999954978,0.9999999999955052,214,198,193,Qiskit_transpiled_QST_proxy_with_QFT_extension,8560,7920,16480,7720
-infinite_well,60,0.1,0.999999999995488,0.999999999995488,0.9999999999955,214,198,193,Qiskit_transpiled_QST_proxy_with_QFT_extension,12840,11880,24720,11580
-infinite_well,80,0.075,0.999999999995481,0.999999999995481,0.9999999999954966,214,198,193,Qiskit_transpiled_QST_proxy_with_QFT_extension,17120,15840,32960,15440
-infinite_well,100,0.06,0.9999999999954776,0.9999999999954776,0.999999999995495,214,198,193,Qiskit_transpiled_QST_proxy_with_QFT_extension,21400,19800,41200,19300

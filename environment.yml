@@ -1,0 +1,25 @@
+# Conda environment for the boundary-aware-dynamics companion code.
+# Cross-platform: no OS-specific pins. Use this or the venv route in
+# docs/REPRODUCIBILITY.md, not both.
+name: boundary-aware-dynamics
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.11
+  - numpy>=2.0
+  - scipy>=1.14
+  - matplotlib>=3.9
+  - pandas>=2.2
+  - pyyaml>=6.0
+  - pytest>=8.0
+  - jupyterlab>=4.0
+  - ipykernel>=6.29
+  - nbclient>=0.10
+  - nbformat>=5.10
+  - pip
+  - pip:
+      # Installed via pip so the version tracks the one this project was
+      # developed against.
+      - qiskit>=2.0
+      - pylatexenc>=2.10
+      - -e .

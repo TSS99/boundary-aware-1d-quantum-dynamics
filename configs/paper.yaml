@@ -1,0 +1,105 @@
+# Full reproduction profile: the parameters cited in the manuscript.
+# This file is the single source of truth; notebooks must not redefine values.
+profile: paper
+seed: 20240517
+output_root: results/paper
+
+physics:
+  hbar: 1.0
+  mass: 1.0
+
+benchmarks:
+
+  # Benchmark A -- harmonic oscillator in a large periodic box.
+  # Validates Strang splitting, the FFT/QFT convention and Trotter convergence.
+  harmonic:
+    omega: 1.0
+    domain:
+      boundary: periodic
+      n_grid: 64
+      x_left: -8.0
+      x_right: 8.0
+    initial_state:
+      centre: 2.0
+      momentum: 0.0
+      sigma: 1.0
+    time_grid:
+      t_max: 6.283185307179586      # one classical period, 2 pi / omega
+      n_steps: 100
+      step_sweep: [10, 20, 40, 80, 160, 320]
+    grid_sweep: [16, 32, 64, 128, 256]
+    reference:
+      dense_grid_size: 4096
+      basis_cap: 128
+      tail_tolerance: 1.0e-10
+
+  # Benchmark B -- infinite square well, zero interior potential.
+  # Control benchmark: the sine propagator is exact here, so this measures
+  # boundary topology, not Trotter error.  t_max is chosen so the packet
+  # reaches the wall (v = k0/m = 2, x0 = 5, so wall contact near t = 2.5).
+  infinite_well:
+    domain:
+      boundary: dirichlet
+      n_grid: 64
+      x_left: 0.0
+      x_right: 10.0
+    initial_state:
+      centre: 5.0
+      momentum: 2.0
+      sigma: 0.8
+      sine_window: true
+    time_grid:
+      t_max: 6.0
+      n_steps: 100
+      step_sweep: [10, 20, 40, 80, 160, 320]
+    grid_sweep: [16, 32, 64, 128, 256]
+    reference:
+      dense_grid_size: 4097
+      basis_cap: 256
+      tail_tolerance: 1.0e-10
+
+  # Benchmark C -- tilted infinite well, V(x) = F (x - L/2).
+  # Hard walls *and* a nonzero interior potential, so [T, V] != 0 and the
+  # Strang splitting has genuine second-order Trotter error to measure.
+  # F and t_max were chosen by measuring the Strang error against exact
+  # diagonalisation of the discrete Hamiltonian: this pair puts the whole sweep
+  # from r = 80 upward in the clean asymptotic regime (successive error ratios
+  # 4.05, 4.01, 4.00, 4.00) while spanning four decades of error. r = 40 sits in
+  # the pre-asymptotic transient and is excluded from the slope fit.
+  tilted_well:
+    tilt_force: 5.0
+    domain:
+      boundary: dirichlet
+      n_grid: 64
+      x_left: 0.0
+      x_right: 10.0
+    initial_state:
+      centre: 5.0
+      momentum: 2.0
+      sigma: 0.8
+      sine_window: true
+    time_grid:
+      t_max: 2.0
+      n_steps: 320
+      step_sweep: [40, 80, 160, 320, 640, 1280]
+    grid_sweep: [16, 32, 64, 128, 256]
+    reference:
+      dense_grid_size: 4097
+      basis_cap: 512
+      tail_tolerance: 1.0e-12
+
+circuits:
+  basis_gates: [rz, sx, x, cx]
+  optimisation_level: 3
+  coupling: all_to_all
+  seed: 20240517
+  approximation_degree: 0.0
+  validation_qubits: [2, 3]
+  validation_tolerance: 1.0e-10
+
+plotting:
+  mode: publication
+  dpi: 600
+  single_column_mm: 85.0
+  double_column_mm: 170.0
+  formats: [pdf, png]

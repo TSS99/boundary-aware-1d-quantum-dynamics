@@ -1,139 +1,212 @@
-# 1D Quantum Dynamics via QFT/QST Split-Operator Trotterisation
+# Boundary-aware spectral propagation for 1D quantum dynamics
 
-This repository contains a reproducible, notebook-based workflow for simulating one-dimensional quantum dynamics on power-of-two qubit grids. The project covers two systems:
+Companion code for a manuscript in preparation for *The European Physical Journal
+Plus*.
 
-- A one-dimensional harmonic oscillator evolved with a periodic QFT/FFT split operator.
-- A one-dimensional infinite potential well evolved with the boundary-compatible quantum-sine-transform (QST) family, implemented numerically as an orthonormal DST-II.
+## Scientific purpose
 
-The workflow is designed for publication-style numerical experiments: exact eigenstate-expansion references, fidelity diagnostics, circuit diagrams, transpiled gate counts, CSV tables, and PNG/PDF figures are generated directly from the notebooks.
+The spectral transform inside a split-operator step is part of the physical
+model, not an implementation detail. A discrete Fourier transform diagonalises the
+Laplacian on a **ring**; a discrete sine transform diagonalises it on a **box with
+hard walls**. Choosing between them chooses which system is being simulated.
 
-## Repository Layout
+This repository measures how much that choice matters, validates the corresponding
+quantum circuits against analytical targets, and reports their cost with the
+assumptions attached.
 
-```text
-.
-|-- figures/                         # Generated PNG/PDF publication figures
-|-- notebooks/
-|   |-- 00_environment_setup.ipynb
-|   |-- 00_common_qft_split_functions.ipynb
-|   |-- 01_harmonic_oscillator_qft_split_operator.ipynb
-|   |-- 02_infinite_well_qft_split_operator.ipynb
-|   |-- 03_circuit_resource_analysis.ipynb
-|   `-- 04_publication_exports.ipynb
-|-- tables/                          # Generated CSV parameter, fidelity, and resource tables
-|-- README.md
-`-- requirements.txt
+## Contribution
+
+Modest and specific. Split-operator propagation, the QFT and quantum sine
+transforms are all established; none is introduced here. What this repository
+adds is:
+
+1. A **validated quantum sine transform circuit** — an explicit odd extension on a
+   `4N`-point register with two unitarily uncomputed ancillas, agreeing with the
+   analytical DST-II propagator to better than `1e-10`.
+2. A **direct quantitative periodic-versus-Dirichlet comparison** of the same
+   hard-wall problem against a reference sharing neither basis nor method with
+   either propagator.
+3. A **hard-wall benchmark with a non-zero interior potential**, so that Trotter
+   convergence can actually be measured under Dirichlet boundaries.
+4. **Resource accounting with its assumptions attached** — ancillas counted,
+   step composition merged correctly, structured synthesis separated from a
+   generic upper bound, connectivity and transpiler settings recorded per row.
+
+See [`docs/PRIOR_WORK.md`](docs/PRIOR_WORK.md) for what is deliberately *not*
+claimed.
+
+## The key result
+
+Propagating the *same* hard-wall wavepacket with the two transforms — identical
+state, box, resolution, interval and step count — and comparing both against an
+independent finite-difference hard-wall reference:
+
+| | Dirichlet (DST-II) | Periodic (FFT) |
+|---|---|---|
+| Final infidelity vs reference | `~1e-5` | order unity |
+| Maximum wall residual | small | several times larger |
+| Divergence between the two | reaches ~1 (nearly orthogonal) | |
+
+Increasing the grid size does not rescue the periodic model: the defect is
+topological, not a resolution deficit.
+
+## Benchmarks
+
+| | System | Boundary | Purpose |
+|---|---|---|---|
+| **A** | Harmonic oscillator in a large periodic box | periodic | Validate Strang splitting and the FFT/QFT convention; measure Trotter and spatial convergence |
+| **B** | Infinite square well, `V = 0` | Dirichlet | **Control.** The sine propagator is exact here, so this measures boundary topology, not integrator accuracy. Hosts the boundary comparison |
+| **C** | Tilted well, `V(x) = F(x - L/2)` | Dirichlet | The genuine Trotter benchmark: `[T, V] != 0` under hard walls |
+
+Benchmark B is deliberately *not* a Trotter benchmark. With zero interior
+potential the Dirichlet splitting is exact, so a step-count sweep there is flat at
+round-off and measures nothing about the time integrator.
+
+## Classical versus quantum-circuit work
+
+Kept explicitly separate throughout:
+
+| Layer | Tool | Where |
+|---|---|---|
+| Spectral propagation | NumPy FFT, SciPy DST-II | `propagators.py` |
+| Reference solutions | dense linear algebra | `references.py` |
+| Circuit construction | Qiskit | `circuits/` |
+| Circuit validation | Qiskit `Operator` / `Statevector` | `tests/`, notebook 04 |
+| Resource estimation | Qiskit transpiler, logical counts | `circuits/resources.py` |
+| Hardware execution | **none performed, none claimed** | — |
+
+## Workflow
+
+```
+configs/*.yaml                     single source of truth for every parameter
+        |
+        v
+src/boundary_aware_dynamics/       grids -> states -> transforms -> propagators
+        |                          references -> diagnostics -> workflows
+        |                          circuits/ (qft, qst, phases, resources)
+        v
+notebooks/00..05                   independent; each imports from src
+        |
+        v
+scripts/reproduce.py               figures, tables, metadata, provenance
+        |
+        v
+results/<profile>/                 figures/ tables/ metadata/ executed_notebooks/
 ```
 
-All executable scientific code is kept inside notebooks. Shared functions live in `notebooks/00_common_qft_split_functions.ipynb`, which is loaded by the physics and resource-analysis notebooks.
+## Repository layout
 
-## Physical Method
+```
+configs/        paper.yaml, smoke.yaml
+src/boundary_aware_dynamics/
+                config, grids, states, transforms, references,
+                propagators, diagnostics, plotting, provenance, workflows
+                circuits/  qft, qst, phases, state_preparation, resources
+notebooks/      00 method & transform validation
+                01 harmonic oscillator          (Benchmark A)
+                02 infinite well & boundary      (Benchmark B)
+                03 tilted infinite well          (Benchmark C)
+                04 circuit validation & resources
+                05 publication exports
+scripts/        reproduce.py, execute_notebooks.py, verify_results.py
+tests/          300+ unit, physics, circuit, convergence and resource tests
+docs/           method, reproducibility, circuit assumptions, error budget,
+                figure captions, manuscript alignment, prior work, release checklist
+references/     references.bib  (entries pending verification)
+results/        generated; not source
+```
 
-The split-operator step uses the second-order symmetric form
+## Installation
 
-$$
-U_2(\Delta t) = e^{-iV\Delta t/(2\hbar)} F^{-1} e^{-iT\Delta t/\hbar} F e^{-iV\Delta t/(2\hbar)} ,
-$$
-
-where $F$ is the Fourier-family transform used by the grid representation. For the harmonic oscillator, $F$ is the periodic QFT/FFT transform. For the infinite well, $F$ is the Dirichlet sine-transform/QST representation compatible with hard-wall boundaries.
-
-The exact reference solution is computed by eigenstate expansion,
-
-$$
-\psi_{\mathrm{ref}}(x,t) = \sum_n c_n \phi_n(x)\,e^{-iE_n t/\hbar}, \qquad c_n = \int \phi_n^*(x)\psi(x,0)\,dx .
-$$
-
-The reported fidelity is
-
-$$
-\mathcal{F}(t) = \left| \Delta x \sum_j \psi_{\mathrm{ref}}^*(x_j,t)\, \psi_{\mathrm{split}}(x_j,t) \right|^2 .
-$$
-
-## Harmonic Oscillator
-
-The harmonic oscillator Hamiltonian is
-
-$$
-H = \frac{p^2}{2m} + \frac{1}{2}m\omega^2x^2 .
-$$
-
-The reference spectrum uses analytical Hermite-function eigenstates with
-
-$$
-E_n = \hbar\omega\left(n+\frac{1}{2}\right).
-$$
-
-Default simulation parameters are stored near the top of `01_harmonic_oscillator_qft_split_operator.ipynb`: $N=64$, $x\in[-8,8)$, $\hbar=m=\omega=1$, $t_{\max}=2\pi$, and `r = 100`.
-
-## Infinite Potential Well
-
-The infinite-well domain is $x\in(0,L)$ with Dirichlet boundary conditions. The initial state is a sine-windowed Gaussian,
-
-$$
-\psi(x,0) \propto \exp\left[-\frac{(x-x_0)^2}{4\sigma^2}\right] e^{ik_0(x-x_0)} \sin\left(\frac{\pi x}{L}\right),
-$$
-
-so that it is compatible with the hard-wall boundaries. The exact reference uses
-
-$$
-\phi_n(x)=\sqrt{\frac{2}{L}}\sin\left(\frac{n\pi x}{L}\right),
-\qquad
-E_n=\frac{\hbar^2\pi^2n^2}{2mL^2}.
-$$
-
-Default simulation parameters are stored near the top of `02_infinite_well_qft_split_operator.ipynb`: $L=10$, $N=64$, $\hbar=m=1$, $t_{\max}=6$, and `r = 100`.
-
-A periodic QFT represents periodic boundary conditions. The infinite-well notebook therefore uses the sine-transform/QST route, which is the Fourier-family transform matched to Dirichlet hard walls. Since the ideal well has zero interior potential, the step-count sweep mainly changes repeated-circuit resource cost; the fidelity curve is expected to remain nearly flat.
-
-## Circuit and Resource Analysis
-
-`03_circuit_resource_analysis.ipynb` builds a single logical split step for each system, renders compact and transpiled circuit diagrams, transpiles to rotational gates plus CX, and records:
-
-- 1-qubit gate count
-- 2-qubit gate count
-- circuit depth
-- gate breakdown by operation name
-- total resource estimates over selected Trotter-step counts
-
-The resource tables are combined with the fidelity sweeps to generate fidelity-vs-gate-count plots.
-
-## Setup on Windows PowerShell
-
-Create and activate a local virtual environment:
-
-```powershell
-cd "choose the directory path"
+```bash
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+# Windows:        .venv\Scripts\activate
+# macOS / Linux:  source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python -m ipykernel install --user --name codex-qft-split --display-name codex-qft-split
+python -m pip install -e ".[dev]"
 ```
 
-If `.venv` is already present locally, activate it and install from `requirements.txt` if needed.
+Python 3.11+. No Jupyter kernel registration is required and no environment
+variable needs to be set; the clone may live at any path.
 
-## Notebook Execution Order
+## Reproduction
 
-Run the notebooks in this order:
-
-1. `notebooks/00_environment_setup.ipynb`
-2. `notebooks/00_common_qft_split_functions.ipynb`
-3. `notebooks/01_harmonic_oscillator_qft_split_operator.ipynb`
-4. `notebooks/02_infinite_well_qft_split_operator.ipynb`
-5. `notebooks/03_circuit_resource_analysis.ipynb`
-6. `notebooks/04_publication_exports.ipynb`
-
-To execute the full workflow from PowerShell:
-
-```powershell
-$env:JUPYTER_PATH = ".\.venv\share\jupyter"
-.\.venv\Scripts\python.exe -m jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=7200 --ExecutePreprocessor.kernel_name=codex-qft-split notebooks\00_environment_setup.ipynb notebooks\00_common_qft_split_functions.ipynb notebooks\01_harmonic_oscillator_qft_split_operator.ipynb notebooks\02_infinite_well_qft_split_operator.ipynb notebooks\03_circuit_resource_analysis.ipynb notebooks\04_publication_exports.ipynb
+```bash
+pytest                                        # ~15 s
+python scripts/reproduce.py --profile smoke   # ~30 s, pipeline check
+python scripts/reproduce.py --profile paper   # ~5-10 min, manuscript numbers
+python scripts/execute_notebooks.py           # fresh-kernel notebook run
+python scripts/verify_results.py --full       # tests, schemas, provenance, notebooks
 ```
 
-## Generated Outputs
+Peak memory stays under 2 GB; no GPU is used.
 
-The notebooks write publication-ready outputs automatically:
+## Key outputs
 
-- `figures/`: 600 dpi PNG and PDF figures for probability snapshots, fidelity curves, spatial convergence, gate counts, fidelity-vs-gate-count plots, and circuit diagrams.
-- `tables/`: CSV files for parameters, fidelity time series, Trotter-step sweeps, spatial convergence, circuit validation, gate breakdowns, resource totals, publication manifest, and final checklist.
+Written to `results/<profile>/`:
 
-The final verification state is recorded in `tables/final_checklist.csv`.
+- `figures/` — PDF (vector) and PNG, sans-serif, colour-blind-safe with distinct
+  dashes and markers so they survive greyscale printing
+- `tables/` — parameters, errors, observables, boundary comparison, convergence,
+  resources, approximate-QFT trade-off
+- `metadata/` — `provenance.json`, `key_results.json`, `figure_manifest.csv`,
+  `config.json`, and `paper_values.tex` (LaTeX macros, so manuscript numbers are
+  never typed by hand)
+- `executed_notebooks/` — notebooks with outputs, tagged with profile and config
+  hash
+
+## Reproducibility model
+
+Configuration is the single source of truth and carries a hash. Every run records
+the commit, working-tree cleanliness, Python and dependency versions, the config
+hash, a hash over the package source, the seeds, and hashes of every output. A
+result is *stale* when any of these has moved — not merely when a file is missing.
+Results from a dirty working tree are written but labelled as such.
+
+Full detail: [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md).
+
+## Known limitations
+
+- Circuit validation at the unitary level is limited to 2–3 data qubits, where the
+  full operator can be formed.
+- Resource counts are **logical**: no error correction, no fault-tolerant
+  overhead, no physical-qubit estimate.
+- State preparation is exact amplitude encoding, exponential in the qubit count.
+  It is costed separately and **no efficient-preparation claim is made**.
+- Quoted fidelities are simulator diagnostics. Measuring them on hardware needs an
+  overlap protocol or tomography, at `1/eps^2` shot cost.
+- No noise model, and no hardware run.
+- Only the specific quadratic and linear diagonals arising here are synthesised
+  structurally; arbitrary potentials are not addressed.
+- Bibliography entries are **unverified** — see below.
+
+## Citation
+
+`CITATION.cff` contains only what could be verified from the repository itself.
+Author list, affiliations, ORCID identifiers, funding and publication metadata are
+**absent and must be supplied by their owners**; they have deliberately not been
+guessed.
+
+## Licence
+
+Released under the [MIT Licence](LICENSE), © 2026 Tilock Sadhukhan.
+
+## Data and code availability
+
+The repository is currently **private** and has not been archived or assigned a
+DOI. It is intended to be made public on acceptance of the accompanying
+manuscript, at which point an archive deposit (and its DOI) should be added here
+and to `CITATION.cff`.
+
+Every outstanding manual item is tracked in
+[`docs/LOCAL_RELEASE_CHECKLIST.md`](docs/LOCAL_RELEASE_CHECKLIST.md).
+
+Bibliographic metadata in `references/references.bib` could not be verified
+offline. Entries marked `VERIFY` must be checked against the published record
+before submission.
+
+## Contact
+
+Repository author, from the local git configuration: Tilock Sadhukhan
+(`tilock.2025@gmail.com`). Corresponding-author designation for the manuscript is
+still to be decided.

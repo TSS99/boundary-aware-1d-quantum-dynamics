@@ -1,2 +1,0 @@
-system,numerical_transform,boundary_model,N,n_qubits,domain,x0,k0,sigma,t_max,r,dt,hbar,m,omega,reference_grid_size,reference_basis_cap,reference_basis_kept,reference_tail_weight,max_edge_probability,fidelity_sweep_r,spatial_convergence_N
-harmonic_oscillator,periodic_QFT_or_FFT,finite_periodic_box_checked_by_edge_probability,64,6,"[-8.0, 8.0)",2.0,0.0,1.0,6.283185307179586,100,0.06283185307179587,1.0,1.0,1.0,4096,128,64,9.371547982084394e-11,5.084141624957183e-07,"20,40,60,80,100","32,64,128"

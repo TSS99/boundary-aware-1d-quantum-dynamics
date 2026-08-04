@@ -1,0 +1,43 @@
+cff-version: 1.2.0
+message: >-
+  This metadata is INCOMPLETE. It contains only fields that could be verified
+  from the local repository itself. Author affiliations, ORCID identifiers,
+  funding and publication metadata are deliberately absent rather than guessed. See docs/LOCAL_RELEASE_CHECKLIST.md before citing or releasing.
+title: >-
+  Boundary-aware spectral propagation for 1D quantum dynamics
+abstract: >-
+  Companion code for a study of how the spectral transform used inside a
+  split-operator step determines the boundary topology represented by the
+  numerical scheme and by its quantum-circuit realisation. Includes a validated
+  quantum sine transform circuit, a direct periodic-versus-Dirichlet comparison
+  against an independent reference, a tilted-well Trotter benchmark under
+  Dirichlet boundaries, and logical resource estimates reported with their
+  assumptions.
+type: software
+version: 0.1.0
+license: MIT
+
+authors:
+  # Taken from the local git configuration. The full author list, ordering,
+  # affiliations and ORCID identifiers must be supplied by the authors
+  # themselves; ORCIDs must never be invented.
+  - family-names: Sadhukhan
+    given-names: Tilock
+    email: tilock.2025@gmail.com
+
+keywords:
+  - quantum simulation
+  - split-operator method
+  - Strang splitting
+  - quantum Fourier transform
+  - quantum sine transform
+  - discrete sine transform
+  - boundary conditions
+  - Trotterisation
+
+# --- Fields intentionally left unset -------------------------------------
+# repository-code:    Repository is private until manuscript acceptance.
+# doi:                No archive deposit has been made, so no DOI exists.
+# date-released:      No release has been made.
+# preferred-citation: Add once the manuscript is accepted, with journal,
+#                     volume, pages and publication DOI.
