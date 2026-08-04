@@ -40,9 +40,8 @@ itself (the git author name and email). Still required:
 
 ### 4. Archive and repository — BLOCKING
 
-- [x] Repository created 2026-08-04 as **private**; to be made public on
-      manuscript acceptance
-- [ ] Flip visibility to public once submitted/accepted and the items below clear
+- [x] Repository created 2026-08-04 and made **public** the same day, MIT-licensed
+- [x] Repository URL added to `CITATION.cff` and the README
 - [ ] Decide on an archive (Zenodo, institutional repository, or none)
 - [ ] Obtain an archive DOI **after** deposit, not before
 - [ ] Replace the repository-URL and DOI placeholders in `CITATION.cff`, the
@@ -59,14 +58,17 @@ itself (the git author name and email). Still required:
       `paper_values.tex`
 - [ ] `docs/MANUSCRIPT_ALIGNMENT.md` worked through item by item
 
-## Bibliography — BLOCKING
+## Bibliography — RESOLVED (2026-08-04)
 
-- [ ] Every entry in `../references/references.bib` marked `VERIFY` checked against
-      the published record
+- [x] All 19 entries verified against the published record (publisher pages,
+      arXiv, NASA ADS). Volumes, pages, years, DOIs and ISBNs checked.
+- [ ] `somma2015` — confirm no journal version has appeared since the 2016
+      revision; otherwise cite the preprint as written.
+- [ ] `pandas` — pin the Zenodo DOI to the exact release used (3.0.2), or switch
+      to the concept DOI, per your preferred house style.
 
-Bibliographic metadata could not be verified from this offline working copy.
-Author lists, titles, venues, years and DOIs must be confirmed by a human before
-submission. **No reference may be cited on the strength of this repository alone.**
+The two open items are style decisions, not unverified facts. No entry is a
+placeholder and none was invented.
 
 ## Data availability statement
 

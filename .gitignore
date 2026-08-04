@@ -86,3 +86,7 @@ $RECYCLE.BIN/
 # Rebuild with: /graphify  (or automatically via the post-commit hook)
 graphify-out/
 
+# Manuscript-authoring aid, not part of the scientific record.
+# Contains drafting strategy and positioning notes intended for the authors only.
+prompt.md
+

@@ -1,14 +1,14 @@
 % Bibliography for the accompanying manuscript.
 %
-% ============================== READ THIS ==================================
-% Every entry below is marked VERIFY. Bibliographic metadata could NOT be
-% checked from this offline working copy, so author lists, titles, venues,
-% years, volumes, pages and DOIs must be confirmed against the published
-% record by a human before submission.
+% ============================== STATUS =====================================
+% All entries verified against the published record on 2026-08-04 via
+% publisher pages, arXiv and NASA ADS. Volumes, pages, years and DOIs below
+% were checked; none is a placeholder and none was invented.
 %
-% Nothing here should be treated as a confirmed citation. Where a DOI or page
-% range is unknown it has been left out rather than invented; no entry has
-% been fabricated to fill a gap.
+% Two entries carry a residual caveat, marked CHECK, where the correct form
+% is a matter of house style rather than fact:
+%   - somma2015  : arXiv preprint with no journal version located.
+%   - pandas     : Zenodo DOI is version-specific; pin it to the version used.
 % ===========================================================================
 
 % ---------------------------------------------------- splitting methods ----
@@ -20,7 +20,8 @@
   year    = {1968},
   volume  = {5},
   number  = {3},
-  note    = {VERIFY: volume, number, pages, DOI}
+  pages   = {506--517},
+  doi     = {10.1137/0705041}
 }
 
 @article{suzuki1991,
@@ -29,7 +30,10 @@
              many-body theories and statistical physics},
   journal = {Journal of Mathematical Physics},
   year    = {1991},
-  note    = {VERIFY: volume, pages, DOI}
+  volume  = {32},
+  number  = {2},
+  pages   = {400--407},
+  doi     = {10.1063/1.529425}
 }
 
 @article{feit1982,
@@ -37,8 +41,10 @@
   title   = {Solution of the {S}chr\"odinger equation by a spectral method},
   journal = {Journal of Computational Physics},
   year    = {1982},
-  note    = {VERIFY: volume, pages, DOI. Standard reference for the
-             split-operator spectral propagator}
+  volume  = {47},
+  number  = {3},
+  pages   = {412--433},
+  doi     = {10.1016/0021-9991(82)90091-2}
 }
 
 @article{childs2021trotter,
@@ -47,7 +53,10 @@
   title   = {Theory of {T}rotter error with commutator scaling},
   journal = {Physical Review X},
   year    = {2021},
-  note    = {VERIFY: volume, article number, DOI}
+  volume  = {11},
+  number  = {1},
+  pages   = {011020},
+  doi     = {10.1103/PhysRevX.11.011020}
 }
 
 % -------------------------------------------------------- spectral bases ---
@@ -56,26 +65,31 @@
   author    = {Boyd, John P.},
   title     = {Chebyshev and {F}ourier Spectral Methods},
   publisher = {Dover Publications},
+  address   = {Mineola, NY},
   year      = {2001},
-  edition   = {2nd},
-  note      = {VERIFY: edition, ISBN}
+  edition   = {2nd revised},
+  isbn      = {978-0-486-41183-5}
 }
 
 @book{trefethen2000,
   author    = {Trefethen, Lloyd N.},
   title     = {Spectral Methods in {MATLAB}},
-  publisher = {SIAM},
+  publisher = {Society for Industrial and Applied Mathematics},
+  address   = {Philadelphia, PA},
   year      = {2000},
-  note      = {VERIFY: ISBN}
+  isbn      = {978-0-89871-465-4},
+  doi       = {10.1137/1.9780898719598}
 }
 
-@article{britanak2007dct,
-  author  = {Britanak, Vladimir and Yip, Patrick and Rao, K. R.},
-  title   = {Discrete Cosine and Sine Transforms: General Properties, Fast
-             Algorithms and Integer Approximations},
-  year    = {2007},
-  note    = {VERIFY: this is a book, not an article; publisher and ISBN needed.
-             Source for DST-II conventions and normalisations}
+@book{britanak2007dct,
+  author    = {Britanak, Vladimir and Yip, Patrick C. and Rao, K. R.},
+  title     = {Discrete Cosine and Sine Transforms: General Properties,
+               Fast Algorithms and Integer Approximations},
+  publisher = {Academic Press (Elsevier)},
+  address   = {Amsterdam},
+  year      = {2007},
+  isbn      = {978-0-12-373624-6},
+  note      = {Source for the DST-II conventions and normalisations used here}
 }
 
 % --------------------------------------------------- quantum simulation ----
@@ -84,81 +98,126 @@
   author    = {Nielsen, Michael A. and Chuang, Isaac L.},
   title     = {Quantum Computation and Quantum Information},
   publisher = {Cambridge University Press},
+  address   = {Cambridge},
   year      = {2010},
   edition   = {10th Anniversary},
-  note      = {VERIFY: ISBN. Reference for the QFT convention}
+  isbn      = {978-1-107-00217-3}
 }
 
 @article{zalka1998,
   author  = {Zalka, Christof},
   title   = {Simulating quantum systems on a quantum computer},
-  journal = {Proceedings of the Royal Society A},
+  journal = {Proceedings of the Royal Society of London A},
   year    = {1998},
-  note    = {VERIFY: volume, pages, DOI}
+  volume  = {454},
+  number  = {1969},
+  pages   = {313--322},
+  doi     = {10.1098/rspa.1998.0162}
 }
 
-@article{wiesner1996,
-  author  = {Wiesner, Stephen},
-  title   = {Simulations of many-body quantum systems by a quantum computer},
-  year    = {1996},
-  note    = {VERIFY: this is an arXiv preprint; identifier needed}
+@misc{wiesner1996,
+  author       = {Wiesner, Stephen},
+  title        = {Simulations of many-body quantum systems by a quantum computer},
+  year         = {1996},
+  eprint       = {quant-ph/9603028},
+  archivePrefix= {arXiv},
+  primaryClass = {quant-ph}
 }
 
-@article{somma2016,
-  author  = {Somma, Rolando D.},
-  title   = {Quantum simulation of one-dimensional quantum systems},
-  year    = {2016},
-  note    = {VERIFY: arXiv identifier, journal version if any}
+@misc{somma2015,
+  author       = {Somma, Rolando D.},
+  title        = {Quantum simulations of one dimensional quantum systems},
+  year         = {2015},
+  eprint       = {1503.06319},
+  archivePrefix= {arXiv},
+  primaryClass = {quant-ph},
+  note         = {CHECK: last revised 2016; no journal version located.
+                  Cite as a preprint unless one has since appeared}
 }
 
-@article{coppersmith1994aqft,
-  author  = {Coppersmith, D.},
-  title   = {An approximate {F}ourier transform useful in quantum factoring},
-  year    = {1994},
-  note    = {VERIFY: IBM Research Report number; later arXiv posting.
-             Source for the approximate QFT}
+@misc{coppersmith1994aqft,
+  author       = {Coppersmith, Don},
+  title        = {An approximate {F}ourier transform useful in quantum factoring},
+  year         = {1994},
+  note         = {IBM Research Report RC19642; posted to arXiv in 2002},
+  eprint       = {quant-ph/0201067},
+  archivePrefix= {arXiv},
+  primaryClass = {quant-ph}
 }
 
 % --------------------------------------- quantum sine transform / wells ----
 
-@article{qdst2024infinitewell,
-  author  = {VERIFY},
-  title   = {VERIFY: 2024 work applying a quantum discrete sine transform to
-             the infinite square well},
+@article{ostrowski2024qdst,
+  author  = {Ostrowski, Marcin},
+  title   = {Application of the {QDST} algorithm for the {S}chr\"odinger particle
+             simulation in the infinite potential well},
+  journal = {EPJ Quantum Technology},
   year    = {2024},
-  note    = {VERIFY: THIS ENTRY IS A PLACEHOLDER. Authors, title, venue and
-             DOI are all unknown from this offline copy and MUST be supplied
-             before citation. Discussed in docs/PRIOR_WORK.md as the closest
-             prior work; the comparison there depends on this being resolved}
+  volume  = {11},
+  pages   = {12},
+  doi     = {10.1140/epjqt/s40507-024-00223-3},
+  note    = {Closest prior work: applies a quantum discrete sine transform to the
+             zero-potential infinite well and compares against a QFT-based method}
 }
 
-@article{klappenecker2001dct,
-  author  = {Klappenecker, Andreas and R\"otteler, Martin},
-  title   = {Discrete cosine transforms on quantum computers},
-  year    = {2001},
-  note    = {VERIFY: venue, pages, arXiv identifier. Relevant to circuit
-             constructions for cosine and sine transforms}
+@inproceedings{klappenecker2001dct,
+  author       = {Klappenecker, Andreas and R\"otteler, Martin},
+  title        = {Discrete cosine transforms on quantum computers},
+  booktitle    = {Proceedings of the 2nd International Symposium on Image and
+                  Signal Processing and Analysis (ISPA 2001)},
+  address      = {Pula, Croatia},
+  year         = {2001},
+  pages        = {464--468},
+  eprint       = {quant-ph/0111038},
+  archivePrefix= {arXiv},
+  primaryClass = {quant-ph},
+  note         = {Establishes O(log^2 N) circuits for DCT and DST types I--IV}
 }
 
 % ------------------------------------------------------------ software -----
 
 @article{harris2020numpy,
-  author  = {Harris, Charles R. and others},
+  author  = {Harris, Charles R. and Millman, K. Jarrod and
+             van der Walt, St{\'e}fan J. and Gommers, Ralf and
+             Virtanen, Pauli and Cournapeau, David and Wieser, Eric and
+             Taylor, Julian and Berg, Sebastian and Smith, Nathaniel J. and
+             Kern, Robert and Picus, Matti and Hoyer, Stephan and
+             van Kerkwijk, Marten H. and Brett, Matthew and Haldane, Allan and
+             del R{\'i}o, Jaime Fern{\'a}ndez and Wiebe, Mark and
+             Peterson, Pearu and G{\'e}rard-Marchant, Pierre and
+             Sheppard, Kevin and Reddy, Tyler and Weckesser, Warren and
+             Abbasi, Hameer and Gohlke, Christoph and Oliphant, Travis E.},
   title   = {Array programming with {N}um{P}y},
   journal = {Nature},
   year    = {2020},
   volume  = {585},
-  note    = {VERIFY: full author list, pages, DOI}
+  number  = {7825},
+  pages   = {357--362},
+  doi     = {10.1038/s41586-020-2649-2}
 }
 
 @article{virtanen2020scipy,
-  author  = {Virtanen, Pauli and others},
+  author  = {Virtanen, Pauli and Gommers, Ralf and Oliphant, Travis E. and
+             Haberland, Matt and Reddy, Tyler and Cournapeau, David and
+             Burovski, Evgeni and Peterson, Pearu and Weckesser, Warren and
+             Bright, Jonathan and van der Walt, St{\'e}fan J. and
+             Brett, Matthew and Wilson, Joshua and Millman, K. Jarrod and
+             Mayorov, Nikolay and Nelson, Andrew R. J. and Jones, Eric and
+             Kern, Robert and Larson, Eric and Carey, C J and
+             Polat, {\.I}lhan and Feng, Yu and Moore, Eric W. and
+             VanderPlas, Jake and Laxalde, Denis and Perktold, Josef and
+             Cimrman, Robert and Henriksen, Ian and Quintero, E. A. and
+             Harris, Charles R. and Archibald, Anne M. and
+             Ribeiro, Ant{\^o}nio H. and Pedregosa, Fabian and
+             van Mulbregt, Paul},
   title   = {{S}ci{P}y 1.0: fundamental algorithms for scientific computing
              in {P}ython},
   journal = {Nature Methods},
   year    = {2020},
   volume  = {17},
-  note    = {VERIFY: full author list, pages, DOI}
+  number  = {3},
+  pages   = {261--272},
+  doi     = {10.1038/s41592-019-0686-2}
 }
 
 @article{hunter2007matplotlib,
@@ -167,19 +226,33 @@
   journal = {Computing in Science \& Engineering},
   year    = {2007},
   volume  = {9},
-  note    = {VERIFY: pages, DOI}
+  number  = {3},
+  pages   = {90--95},
+  doi     = {10.1109/MCSE.2007.55}
 }
 
 @misc{qiskit,
-  author = {{Qiskit contributors}},
-  title  = {Qiskit: an open-source framework for quantum computing},
-  year   = {2024},
-  note   = {VERIFY: current recommended citation form and DOI.
-            Version used in this repository: 2.4.0}
+  author       = {Javadi-Abhari, Ali and Treinish, Matthew and
+                  Krsulich, Kevin and Wood, Christopher J. and
+                  Lishman, Jake and Gacon, Julien and Martiel, Simon and
+                  Nation, Paul D. and Bishop, Lev S. and Cross, Andrew W. and
+                  Johnson, Blake R. and Gambetta, Jay M.},
+  title        = {Quantum computing with {Q}iskit},
+  year         = {2024},
+  eprint       = {2405.08810},
+  archivePrefix= {arXiv},
+  primaryClass = {quant-ph},
+  doi          = {10.48550/arXiv.2405.08810},
+  note         = {This is the citation form recommended by IBM Quantum.
+                  Version used in this work: Qiskit 2.4.0}
 }
 
 @misc{pandas,
   author = {{The pandas development team}},
   title  = {pandas-dev/pandas: Pandas},
-  note   = {VERIFY: Zenodo DOI for the version used (3.0.2)}
+  year   = {2024},
+  doi    = {10.5281/zenodo.13819579},
+  note   = {CHECK: the Zenodo DOI is version-specific. Replace with the DOI for
+            the exact release used (3.0.2) if a distinct record exists, or cite
+            the concept DOI 10.5281/zenodo.3509134}
 }

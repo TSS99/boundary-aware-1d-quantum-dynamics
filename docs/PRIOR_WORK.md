@@ -61,8 +61,10 @@ non-zero-potential hard-wall benchmark where Trotter convergence is meaningful;
 and resource counts qualified by ancillas, composition, synthesis model and
 connectivity.
 
-> **Verification note.** Exact bibliographic metadata for the 2024 QDST work — and
-> for every entry in `../references/references.bib` — has **not** been verified
-> from this offline working copy. Entries marked `VERIFY` in that file must be
-> checked against the published record before submission. Nothing here should be
-> taken as confirming an author list, title, venue, year or DOI.
+> **Verification note.** All entries in `../references/references.bib` were
+> verified against the published record on 2026-08-04 via publisher pages, arXiv
+> and NASA ADS. The prior work above is M. Ostrowski, *Application of the QDST
+> algorithm for the Schrödinger particle simulation in the infinite potential
+> well*, EPJ Quantum Technology **11**, 12 (2024), DOI
+> `10.1140/epjqt/s40507-024-00223-3`. Two entries carry a residual `CHECK` note
+> where the correct form is a matter of house style rather than fact.

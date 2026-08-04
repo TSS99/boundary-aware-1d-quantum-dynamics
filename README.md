@@ -112,7 +112,7 @@ scripts/        reproduce.py, execute_notebooks.py, verify_results.py
 tests/          300+ unit, physics, circuit, convergence and resource tests
 docs/           method, reproducibility, circuit assumptions, error budget,
                 figure captions, manuscript alignment, prior work, release checklist
-references/     references.bib  (entries pending verification)
+references/     references.bib  (19 entries, all verified)
 results/        generated; not source
 ```
 
@@ -178,7 +178,6 @@ Full detail: [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md).
 - No noise model, and no hardware run.
 - Only the specific quadratic and linear diagonals arising here are synthesised
   structurally; arbitrary potentials are not addressed.
-- Bibliography entries are **unverified** — see below.
 
 ## Citation
 
@@ -193,17 +192,18 @@ Released under the [MIT Licence](LICENSE), © 2026 Tilock Sadhukhan.
 
 ## Data and code availability
 
-The repository is currently **private** and has not been archived or assigned a
-DOI. It is intended to be made public on acceptance of the accompanying
-manuscript, at which point an archive deposit (and its DOI) should be added here
-and to `CITATION.cff`.
+The repository is **public** and MIT-licensed at
+<https://github.com/TSS99/boundary-aware-1d-quantum-dynamics>. It has not yet been
+archived or assigned a DOI; an archive deposit (Zenodo or institutional) and its
+DOI should be added here and to `CITATION.cff` before the manuscript is
+submitted.
 
 Every outstanding manual item is tracked in
 [`docs/LOCAL_RELEASE_CHECKLIST.md`](docs/LOCAL_RELEASE_CHECKLIST.md).
 
-Bibliographic metadata in `references/references.bib` could not be verified
-offline. Entries marked `VERIFY` must be checked against the published record
-before submission.
+All 19 entries in `references/references.bib` were verified against the published
+record on 2026-08-04. Two carry a `CHECK` note where the citation form is a
+house-style choice rather than an unverified fact.
 
 ## Contact
 

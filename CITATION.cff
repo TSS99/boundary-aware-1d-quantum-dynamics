@@ -35,8 +35,9 @@ keywords:
   - boundary conditions
   - Trotterisation
 
+repository-code: https://github.com/TSS99/boundary-aware-1d-quantum-dynamics
+
 # --- Fields intentionally left unset -------------------------------------
-# repository-code:    Repository is private until manuscript acceptance.
 # doi:                No archive deposit has been made, so no DOI exists.
 # date-released:      No release has been made.
 # preferred-citation: Add once the manuscript is accepted, with journal,
