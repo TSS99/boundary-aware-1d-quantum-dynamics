@@ -26,6 +26,11 @@ dev = [
     "nbformat>=5.10",
     "pylatexenc>=2.10",
 ]
+# Only scripts/hardware_run.py needs this, and only to talk to a real device.
+# Everything under results/paper is produced without it.
+hardware = [
+    "qiskit-ibm-runtime>=0.40",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

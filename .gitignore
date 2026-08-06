@@ -50,7 +50,31 @@ htmlcov/
 #     python scripts/reproduce.py --profile paper
 # Provenance is recorded in results/<profile>/metadata/provenance.json, so these
 # files are reconstructible rather than primary sources.
-results/
+# Written as results/* rather than results/ so that a single subdirectory can be
+# re-included below; git will not descend into a directory ignored by name.
+results/*
+
+# Exception: the hardware measurements are primary data, not generated output.
+# A simulator result can be rebuilt by running the script again; a device run
+# cannot be rebuilt at all -- it cost QPU time, the calibration it was taken
+# under is gone, and the same job will never return the same counts.
+!results/hardware/
+
+# ----------------------------------------------------------- credentials ---
+# API tokens and account files never belong in the repository. The hardware
+# script reads IBM_QUANTUM_TOKEN from the environment for exactly this reason.
+.qiskit/
+qiskit-ibm.json
+qiskit-ibm-runtime.json
+*credentials*.json
+secrets.*
+*.token
+*_token.txt
+*.pem
+*.key
+*.p12
+*.pfx
+.netrc
 
 # ------------------------------------------------------------ editors/IDE --
 .vscode/
@@ -79,6 +103,54 @@ $RECYCLE.BIN/
 .fuse_hidden*
 .nfs*
 
+# ------------------------------------------------- large binary artefacts --
+# Numerical dumps and archives. Everything this project needs is either source,
+# a small table, or a vector figure; anything below is either regenerable output
+# or something that should live outside version control.
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.nc
+*.pkl
+*.pickle
+*.joblib
+*.qpy
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+*.mp4
+*.mov
+*.avi
+*.gif
+# Raster figures at print resolution. Vector PDF is the archival format here;
+# a PNG of the same figure is a convenience copy that git should not carry.
+# Delete this rule if a raster is ever the only form a figure exists in.
+*.png.orig
+
+# ------------------------------------------------------------------ LaTeX --
+# Build artefacts, in case a manuscript directory is ever tracked.
+*.aux
+*.bbl
+*.blg
+*.brf
+*.fdb_latexmk
+*.fls
+*.idx
+*.ilg
+*.ind
+*.lof
+*.lot
+*.nav
+*.out
+*.snm
+*.synctex.gz
+*.toc
+*.xdv
+
 # ------------------------------------------------------------------ misc ---
 *.log
 
@@ -89,4 +161,8 @@ graphify-out/
 # Manuscript-authoring aid, not part of the scientific record.
 # Contains drafting strategy and positioning notes intended for the authors only.
 prompt.md
+
+# Manuscript working directory: Springer class files and LaTeX build artefacts.
+# Not part of the scientific record; the paper is published by the journal.
+manuscript/
 

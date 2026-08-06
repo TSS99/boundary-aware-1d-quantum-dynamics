@@ -81,3 +81,34 @@ and a two-ancilla quantum sine transform; a periodic condition leads to a
 uniform grid, the DFT and an ancilla-free QFT. Both feed the same Strang
 splitting and are validated against independent references. The two paths are not
 interchangeable: they represent different physical systems.
+
+**`harmonic_circuit`** — *One Strang step of the harmonic propagator, Benchmark
+A, as executable gates.* The manuscript grid, `N = 64`: six data qubits, no
+ancillas, 174 single-qubit and 108 two-qubit gates. Transpiled to the
+`rz/sx/x/cx` basis with all-to-all connectivity, optimisation level 3 and the
+fixed transpiler seed, so every element shown is a single- or two-qubit gate.
+The QFT, the diagonal kinetic phase and the inverse QFT are no longer separable
+by eye after transpilation, which is the point: this is the circuit behind the
+density snapshots, not an illustration of it.
+
+**`infinite_well_circuit`** — *One Strang step of the free hard-wall
+propagator, Benchmark B, as executable gates.* Same grid, basis and transpiler
+settings as `harmonic_circuit`. Eight wires: `q_0` and `q_7` are the two QST
+ancillas that carry the odd extension, `q_1` to `q_6` the data register. The
+interior potential is zero here, so the step is the sine transform, the kinetic
+phase and the inverse transform alone.
+
+**`tilted_well_circuit`** — *One Strang step of the tilted hard-wall
+propagator, Benchmark C, as executable gates.* As `infinite_well_circuit`, with
+the two half-strength linear tilt phases that flank the kinetic block; these are
+the gates absent from Benchmark B.
+
+All three are drawn at the manuscript register size, so they are large — half a
+metre across folded at forty gate columns per row — and are written as vector
+PDF only, since a 600 dpi raster of a figure that size runs to tens of megabytes
+and carries nothing the PDF does not. They use Qiskit's IBM (`iqp`) scheme
+rather than the repository palette: that palette exists to separate data series,
+and a circuit diagram has none. `display_circuit` and `propagation_resources`
+build and transpile through the same code path, so these diagrams show exactly
+the structure that `resource_scaling` and `resource_single_step.csv` count.
+Per-figure gate counts are in `tables/circuit_diagrams.csv`.

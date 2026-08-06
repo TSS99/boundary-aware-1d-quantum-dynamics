@@ -56,6 +56,7 @@ __all__ = [
     "approximate_qft_study",
     "build_propagation_core",
     "count_resources",
+    "display_circuit",
     "measure_qft_approximation_error",
     "propagation_resources",
     "scaling_table",
@@ -182,12 +183,12 @@ class ResourceRow:
         return asdict(self)
 
 
-def count_resources(
+def _transpile(
     circuit: QuantumCircuit,
     config: RunConfig,
     connectivity: str = "all_to_all",
-) -> dict[str, int]:
-    """Transpile and return one-/two-qubit counts, two-qubit depth and depth."""
+) -> QuantumCircuit:
+    """Transpile to the configured basis gates under the requested connectivity."""
     settings = config.circuits
     coupling = None
     if connectivity == "linear":
@@ -195,13 +196,22 @@ def count_resources(
     elif connectivity != "all_to_all":
         raise ValueError(f"Unknown connectivity {connectivity!r}.")
 
-    transpiled = transpile(
+    return transpile(
         circuit,
         basis_gates=list(settings.basis_gates),
         coupling_map=coupling,
         optimization_level=settings.optimisation_level,
         seed_transpiler=settings.seed,
     )
+
+
+def count_resources(
+    circuit: QuantumCircuit,
+    config: RunConfig,
+    connectivity: str = "all_to_all",
+) -> dict[str, int]:
+    """Transpile and return one-/two-qubit counts, two-qubit depth and depth."""
+    transpiled = _transpile(circuit, config, connectivity)
 
     one_qubit = two_qubit = 0
     two_qubit_circuit = transpiled.copy_empty_like()
@@ -228,16 +238,33 @@ def count_resources(
     }
 
 
-def propagation_resources(
+@dataclass
+class _BenchmarkCircuit:
+    """The propagation core of one benchmark, with the labels needed to report it."""
+
+    circuit: QuantumCircuit
+    boundary: str
+    transform: str
+    n_grid: int
+    n_data_qubits: int
+    n_ancilla_qubits: int
+    n_steps: int
+    has_potential: bool
+
+
+def _benchmark_circuit(
     config: RunConfig,
     name: str,
-    n_steps: int | None = None,
-    n_grid: int | None = None,
-    synthesis: SynthesisModel = "structured",
-    connectivity: str = "all_to_all",
-    approximation_degree: int = 0,
-) -> ResourceRow:
-    """Return the resource row for the propagation core of one benchmark."""
+    n_steps: int | None,
+    n_grid: int | None,
+    synthesis: SynthesisModel,
+    approximation_degree: int,
+) -> _BenchmarkCircuit:
+    """Build the propagation core for one benchmark.
+
+    Both the resource row and the drawn circuit come through here, so what a
+    figure shows is by construction what the tables count.
+    """
     benchmark = config.benchmark(name)
     physics = config.physics
     grid_size = benchmark.domain.n_grid if n_grid is None else n_grid
@@ -246,7 +273,6 @@ def propagation_resources(
     length = benchmark.domain.length
     boundary = benchmark.domain.boundary
 
-    n_data = int(np.log2(grid_size))
     if boundary == "periodic":
         spacing = length / grid_size
         kinetic = signed_momentum_expansion(grid_size, spacing, physics.mass, physics.hbar, time_step)
@@ -274,10 +300,58 @@ def propagation_resources(
             full = half = None
         n_ancilla, transform = 2, "QST"
 
-    circuit = build_propagation_core(
-        boundary, grid_size, steps, full, kinetic, half, synthesis, approximation_degree
+    return _BenchmarkCircuit(
+        circuit=build_propagation_core(
+            boundary, grid_size, steps, full, kinetic, half, synthesis, approximation_degree
+        ),
+        boundary=boundary,
+        transform=transform,
+        n_grid=grid_size,
+        n_data_qubits=int(np.log2(grid_size)),
+        n_ancilla_qubits=n_ancilla,
+        n_steps=steps,
+        has_potential=full is not None,
     )
-    counts = count_resources(circuit, config, connectivity)
+
+
+def display_circuit(
+    config: RunConfig,
+    name: str,
+    n_grid: int,
+    n_steps: int = 1,
+    synthesis: SynthesisModel = "structured",
+    connectivity: str = "all_to_all",
+    approximation_degree: int = 0,
+) -> QuantumCircuit:
+    """The propagation core transpiled to the basis gate set, ready to draw.
+
+    Same construction and same transpiler settings as
+    :func:`propagation_resources`, so the drawn gates are the counted gates.
+    ``n_grid`` is required rather than defaulting to the benchmark's own grid:
+    the register the manuscript uses produces several hundred gates, which is a
+    correct circuit and an unreadable figure, so the caller has to state the
+    size it is drawing.
+    """
+    built = _benchmark_circuit(config, name, n_steps, n_grid, synthesis, approximation_degree)
+    return _transpile(built.circuit, config, connectivity)
+
+
+def propagation_resources(
+    config: RunConfig,
+    name: str,
+    n_steps: int | None = None,
+    n_grid: int | None = None,
+    synthesis: SynthesisModel = "structured",
+    connectivity: str = "all_to_all",
+    approximation_degree: int = 0,
+) -> ResourceRow:
+    """Return the resource row for the propagation core of one benchmark."""
+    built = _benchmark_circuit(config, name, n_steps, n_grid, synthesis, approximation_degree)
+    boundary, transform = built.boundary, built.transform
+    grid_size, steps = built.n_grid, built.n_steps
+    n_data, n_ancilla = built.n_data_qubits, built.n_ancilla_qubits
+    full = built.has_potential
+    counts = count_resources(built.circuit, config, connectivity)
 
     return ResourceRow(
         benchmark=name,
@@ -299,7 +373,7 @@ def propagation_resources(
         scope="propagation_core_only",
         notes=(
             f"{steps} kinetic blocks; 1 half + {max(steps - 1, 0)} full + 1 half potential phases"
-            if full is not None
+            if full
             else f"{steps} kinetic blocks; zero interior potential so no potential phases"
         ),
         **counts,

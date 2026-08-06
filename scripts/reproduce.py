@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from boundary_aware_dynamics import plotting  # noqa: E402
 from boundary_aware_dynamics.circuits.resources import (  # noqa: E402
     approximate_qft_study,
+    display_circuit,
     propagation_resources,
     scaling_table,
 )
@@ -56,6 +57,14 @@ from boundary_aware_dynamics.workflows import (  # noqa: E402
 
 BENCHMARKS = ("harmonic", "infinite_well", "tilted_well")
 NUMERICAL_FLOOR = 1e-13
+# The drawn circuits use the manuscript grid, so they are the circuits that
+# produced the density snapshots rather than a reduced illustration: six data
+# qubits, plus two QST ancillas on the hard-wall benchmarks. One Strang step at
+# this size is several hundred gates, so the figures are large; they are written
+# as vector PDF only, since a 600 dpi raster of a half-metre figure is tens of
+# megabytes and carries nothing the PDF does not.
+CIRCUIT_DISPLAY_GRID = 64
+CIRCUIT_FOLD = 40
 
 
 def write_table(frame: pd.DataFrame, directory: Path, name: str) -> Path:
@@ -91,7 +100,7 @@ def main() -> int:
             FigureRecord(
                 figure_id=figure_id,
                 filename=f"{stem}",
-                formats=list(formats),
+                formats=list(parameters.pop("formats", formats)),
                 source_notebook=parameters.pop("notebook", "scripts/reproduce.py"),
                 source_data=source_data,
                 config_hash=config.config_hash,
@@ -237,7 +246,7 @@ def main() -> int:
         "finite-difference hard-wall reference; (b) divergence between the two propagations; "
         "(c) residual wall amplitude. The periodic representation fails once the packet reaches "
         "the wall.",
-        width_mm=170.0, height_mm=52.0,
+        width_mm=170.0, height_mm=58.0,
     )
 
     snapshots = np.unique(np.linspace(0, len(comparison.times) - 1, 4).astype(int))
@@ -352,6 +361,53 @@ def main() -> int:
         "the two QST ancillas.",
     )
 
+    # ------------------------------------------------ circuit diagrams -----
+    print("  circuit diagrams ...")
+    circuit_rows = []
+    for name in BENCHMARKS:
+        circuit = display_circuit(config, name, n_grid=CIRCUIT_DISPLAY_GRID, n_steps=1)
+        gate_counts = {
+            gate: int(count) for gate, count in circuit.count_ops().items() if gate != "barrier"
+        }
+        one_qubit = sum(
+            1 for instruction in circuit.data if instruction.operation.num_qubits == 1
+        )
+        two_qubit = sum(
+            1 for instruction in circuit.data if instruction.operation.num_qubits == 2
+        )
+        figure = plotting.plot_circuit_diagram(circuit, fold=CIRCUIT_FOLD)
+        width_mm, height_mm = (25.4 * value for value in figure.get_size_inches())
+        save_figure(figure, f"{name}_circuit", figures_dir, ("pdf",), dpi)
+        matplotlib.pyplot.close(figure)
+        record(
+            f"{name}_circuit", f"{name}_circuit", "tables/circuit_diagrams.csv",
+            f"One Strang step of the {name.replace('_', ' ')} propagator on the "
+            f"{CIRCUIT_DISPLAY_GRID}-point manuscript grid ({circuit.num_qubits} qubits), "
+            f"transpiled to {'+'.join(config.circuits.basis_gates)} with all-to-all "
+            f"connectivity, optimisation level {config.circuits.optimisation_level} and a fixed "
+            f"transpiler seed, so every element is a single- or two-qubit gate. This is the "
+            f"circuit behind the density snapshots, not a reduced illustration of it. Drawn in "
+            f"Qiskit's IBM (iqp) scheme.",
+            width_mm=round(width_mm, 1), height_mm=round(height_mm, 1),
+            formats=("pdf",),
+            n_grid=CIRCUIT_DISPLAY_GRID, n_qubits=circuit.num_qubits,
+            one_qubit_gates=one_qubit, two_qubit_gates=two_qubit,
+        )
+        circuit_rows.append(
+            {
+                "benchmark": name,
+                "n_grid": CIRCUIT_DISPLAY_GRID,
+                "n_qubits": circuit.num_qubits,
+                "n_steps": 1,
+                "one_qubit_gates": one_qubit,
+                "two_qubit_gates": two_qubit,
+                "depth": int(circuit.depth()),
+                "basis_gates": "+".join(config.circuits.basis_gates),
+                **{f"gate_{gate}": count for gate, count in sorted(gate_counts.items())},
+            }
+        )
+    write_table(pd.DataFrame(circuit_rows).fillna(0), tables_dir, "circuit_diagrams.csv")
+
     approximation_rows = approximate_qft_study(config, "harmonic", degrees=(0, 1, 2, 3), n_steps=1)
     write_table(pd.DataFrame(approximation_rows), tables_dir, "approximate_qft.csv")
 
@@ -369,7 +425,7 @@ def main() -> int:
         "graphical_abstract", "graphical_abstract", "n/a",
         "Boundary condition determines grid, transform and circuit structure, and hence the "
         "physics the propagator represents.",
-        width_mm=170.0, height_mm=46.0,
+        width_mm=170.0, height_mm=58.0,
     )
 
     # -------------------------------------------------------- metadata -----

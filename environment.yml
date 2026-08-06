@@ -22,4 +22,7 @@ dependencies:
       # developed against.
       - qiskit>=2.0
       - pylatexenc>=2.10
+      # Needed only by scripts/hardware_run.py, which talks to an IBM device.
+      # The simulator results do not depend on it.
+      - qiskit-ibm-runtime>=0.40
       - -e .

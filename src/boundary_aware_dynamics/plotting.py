@@ -15,7 +15,12 @@ Rules enforced here rather than left to the caller
   ``docs/FIGURE_CAPTIONS.md`` so they can be edited without regenerating a
   figure, and journals set titles from the caption.
 * **Numerical floors are annotated**, so a curve that has stopped converging is
-  visibly at the floor rather than looking like a failure of the method.
+  visibly at the floor rather than looking like a failure of the method.  The
+  annotation is placed where the data is furthest from the floor, so it never
+  lands on a curve.
+* **Nothing is written on top of data.**  Every panel reserves empty space above
+  its data before a legend or an in-axes label is drawn there, and legends carry
+  an opaque frame so that a curve passing behind one cannot make it unreadable.
 * **Convergence fits carry their window.**  The fitted interval is shaded and the
   expected theoretical slope is drawn as a guide, so a reported slope is never
   detached from the range it was fitted over.
@@ -39,6 +44,7 @@ from typing import Any
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.patches import FancyBboxPatch
 
 __all__ = [
     "FigureManifest",
@@ -47,6 +53,7 @@ __all__ = [
     "apply_style",
     "millimetres",
     "plot_boundary_comparison",
+    "plot_circuit_diagram",
     "plot_convergence",
     "plot_density_snapshots",
     "plot_error_vs_time",
@@ -123,6 +130,78 @@ def _panel_label(axis: plt.Axes, label: str) -> None:
     axis.text(
         -0.16, 1.04, label, transform=axis.transAxes,
         fontsize=mpl.rcParams["font.size"] + 1, fontweight="bold", va="bottom", ha="left",
+    )
+
+
+def _headroom(axis: plt.Axes, fraction: float = 0.30) -> None:
+    """Reserve empty space above the data.
+
+    A legend or an in-axes label is only safe once the space it will occupy is
+    known to be empty, so every panel that carries one calls this first.
+    ``fraction`` is measured in axis span: decades on a logarithmic axis, data
+    units on a linear one.
+    """
+    bottom, top = axis.get_ylim()
+    if axis.get_yscale() == "log":
+        if bottom <= 0.0 or top <= 0.0:
+            return
+        decades = np.log10(top / bottom)
+        axis.set_ylim(bottom, bottom * 10.0 ** (decades * (1.0 + fraction)))
+    else:
+        axis.set_ylim(bottom, bottom + (top - bottom) * (1.0 + fraction))
+
+
+def _framed_legend(axis: plt.Axes, **kwargs: Any) -> plt.Legend:
+    """Legend on an opaque panel, so a curve behind it cannot obscure the text."""
+    legend = axis.legend(**kwargs)
+    legend.set_frame_on(True)
+    frame = legend.get_frame()
+    frame.set_facecolor("white")
+    frame.set_edgecolor(PALETTE["grid"])
+    frame.set_linewidth(0.5)
+    frame.set_alpha(0.92)
+    return legend
+
+
+def _clearest_fraction(
+    x_values: np.ndarray, curves: list[np.ndarray], log_x: bool
+) -> float:
+    """Fraction along the x axis where the data sits furthest above the floor.
+
+    Used to place the floor annotation: writing it at a fixed end of the axis
+    puts it on top of a curve whenever that curve happens to end near the floor.
+    """
+    positions = np.asarray(x_values, dtype=float)
+    if log_x:
+        positions = np.log10(np.maximum(positions, 1e-300))
+    low, high = positions.min(), positions.max()
+    if high <= low:
+        return 0.5
+    best_fraction, best_clearance = 0.5, -np.inf
+    for fraction in (0.15, 0.5, 0.85):
+        centre = low + fraction * (high - low)
+        window = np.abs(positions - centre) <= 0.18 * (high - low)
+        if not window.any():
+            continue
+        clearance = min(np.min(np.asarray(curve, dtype=float)[window]) for curve in curves)
+        if clearance > best_clearance:
+            best_fraction, best_clearance = fraction, clearance
+    return best_fraction
+
+
+def _annotate_floor(
+    axis: plt.Axes, x_values: np.ndarray, curves: list[np.ndarray], floor: float
+) -> None:
+    """Draw the numerical floor and label it clear of the data."""
+    axis.axhline(floor, color=PALETTE["floor"], linewidth=0.8, linestyle=":")
+    fraction = _clearest_fraction(x_values, curves, axis.get_xscale() == "log")
+    axis.text(
+        fraction, floor, "numerical floor",
+        # x in axis fractions, y in data units, so the label rides the floor line.
+        transform=axis.get_yaxis_transform(), ha="center", va="bottom",
+        fontsize=mpl.rcParams["font.size"] - 1.5, color=PALETTE["floor"],
+        bbox={"boxstyle": "square,pad=0.2", "facecolor": "white",
+              "edgecolor": "none", "alpha": 0.85},
     )
 
 
@@ -208,13 +287,18 @@ def plot_density_snapshots(
     legend is placed below the panels rather than inside the top one: an
     in-axes legend for three series is wide enough at single-column width to
     collapse the axes entirely.
+
+    Each panel is scaled to its own peak with a reserved band above it, and the
+    time stamp is written in that band.  Fixing the label position without
+    reserving the space puts it on top of the density whenever the packet is
+    tall near the left wall, which is exactly the interesting case.
     """
     if width_mm is None:
         width_mm = 85.0 if len(series) <= 2 else 170.0
 
     n_panels = len(snapshot_indices)
     figure, axes = plt.subplots(
-        n_panels, 1, figsize=(millimetres(width_mm), 0.8 * n_panels + 0.65),
+        n_panels, 1, figsize=(millimetres(width_mm), 0.85 * n_panels + 0.7),
         sharex=True, constrained_layout=True,
     )
     axes = np.atleast_1d(axes)
@@ -238,9 +322,14 @@ def plot_density_snapshots(
                 alpha=0.35 if is_reference else 1.0,
                 solid_capstyle="round", label=labels.get(key, key),
             )
+        peak = max(float(np.max(np.abs(states[index]) ** 2)) for states in series.values())
+        if peak > 0.0:
+            axis.set_ylim(0.0, peak * 1.32)
+        axis.set_xlim(float(positions.min()), float(positions.max()))
+        axis.yaxis.set_major_locator(mpl.ticker.MaxNLocator(nbins=3))
         axis.set_ylabel(r"$|\psi|^2$")
         axis.text(
-            0.015, 0.9, rf"$t={times[index]:.2f}$", transform=axis.transAxes,
+            0.012, 0.97, rf"$t={times[index]:.2f}$", transform=axis.transAxes,
             ha="left", va="top", fontsize=mpl.rcParams["font.size"] - 0.5,
             bbox={"boxstyle": "square,pad=0.15", "facecolor": "white",
                   "edgecolor": "none", "alpha": 0.85},
@@ -286,18 +375,18 @@ def plot_error_vs_time(
             markerfacecolor="white", markeredgewidth=0.9, label=labels.get(key, key),
         )
 
+    curves = [np.maximum(np.asarray(values, dtype=float), 1e-18) for values in series.values()]
     if floor is not None:
-        axis.axhline(floor, color=PALETTE["floor"], linewidth=0.8, linestyle=":")
-        axis.text(
-            times[-1], floor * 1.6, "numerical floor", ha="right", va="bottom",
-            fontsize=mpl.rcParams["font.size"] - 1.5, color=PALETTE["floor"],
-        )
+        _annotate_floor(axis, times, curves, floor)
 
     axis.set_xlabel(r"$t$")
     axis.set_ylabel(ylabel)
     _recessive_grid(axis)
     if len(series) > 1:
-        axis.legend(loc="best")
+        # Reserve the band first: these curves rise to the right, so an
+        # unreserved "best" legend lands on the end of the data.
+        _headroom(axis, 0.22)
+        _framed_legend(axis, loc="upper left")
     return figure
 
 
@@ -346,11 +435,7 @@ def plot_convergence(
     # Draw the numerical floor only when the data is actually near it. Otherwise
     # the axis stretches over empty decades and the trend looks flat.
     if floor is not None and errors.min() < 100.0 * floor:
-        axis.axhline(floor, color=PALETTE["floor"], linewidth=0.8, linestyle=":")
-        axis.text(
-            step_sizes.max(), floor * 1.5, "numerical floor", ha="right", va="bottom",
-            fontsize=mpl.rcParams["font.size"] - 1.5, color=PALETTE["floor"],
-        )
+        _annotate_floor(axis, step_sizes, [errors], floor)
     else:
         axis.set_ylim(errors.min() / 4.0, errors.max() * 4.0)
 
@@ -363,7 +448,10 @@ def plot_convergence(
     axis.set_xlabel(xlabel)
     axis.set_ylabel(ylabel)
     _recessive_grid(axis)
-    axis.legend(loc="best")
+    # The data runs corner to corner, so the upper left is the only empty region
+    # and it is only large enough for a three-entry legend once it is reserved.
+    _headroom(axis, 0.34)
+    _framed_legend(axis, loc="upper left")
     return figure
 
 
@@ -381,9 +469,14 @@ def plot_boundary_comparison(
     (a) error of each propagator against an independent hard-wall reference;
     (b) how far the two propagations have drifted from one another;
     (c) how well each respects the wall condition it is supposed to model.
+
+    Panels (a) and (c) show the same two series, so they share one legend below
+    the row.  Repeating it inside each panel costs the space the curves need:
+    the wall residual in (c) peaks in the upper half at both ends, leaving no
+    in-axes corner that a legend can occupy without covering data.
     """
     figure, axes = plt.subplots(
-        1, 3, figsize=(millimetres(width_mm), millimetres(52.0)), constrained_layout=True
+        1, 3, figsize=(millimetres(width_mm), millimetres(58.0)), constrained_layout=True
     )
 
     # Labels are kept short: at 170 mm across three panels there is roughly
@@ -399,7 +492,6 @@ def plot_boundary_comparison(
     )
     axes[0].set_ylim(bottom=0.2 * floor)
     axes[0].set_ylabel("Infidelity vs reference")
-    axes[0].legend(loc="lower right")
     _panel_label(axes[0], "(a)")
 
     axes[1].plot(times, 1.0 - cross_fidelity, color=PALETTE["third"], linewidth=1.4)
@@ -410,12 +502,19 @@ def plot_boundary_comparison(
     axes[2].plot(times, dirichlet_wall, **_line("dirichlet", times), label="Dirichlet (DST-II)")
     axes[2].plot(times, periodic_wall, **_line("periodic", times), label="Periodic (FFT)")
     axes[2].set_ylabel("Wall residual")
-    axes[2].legend(loc="upper left")
+    axes[2].set_ylim(bottom=0.0)
     _panel_label(axes[2], "(c)")
 
     for axis in axes:
         axis.set_xlabel(r"$t$")
+        axis.set_xlim(float(times[0]), float(times[-1]))
         _recessive_grid(axis)
+
+    handles, labels = axes[2].get_legend_handles_labels()
+    figure.legend(
+        handles, labels, loc="outside lower center", ncol=2,
+        columnspacing=1.8, handlelength=2.4,
+    )
     return figure
 
 
@@ -452,60 +551,176 @@ def plot_resource_scaling(
         )
     axis.set_xlabel("Total qubits (data + ancilla)")
     axis.set_ylabel(ylabel)
+    # A register cannot hold half a qubit, so only integer ticks are meaningful.
+    axis.xaxis.set_major_locator(mpl.ticker.MaxNLocator(integer=True))
     _recessive_grid(axis)
-    axis.legend(loc="upper left")
+    _headroom(axis, 0.26)
+    _framed_legend(axis, loc="upper left")
     return figure
 
 
-def plot_graphical_abstract(width_mm: float = 170.0) -> plt.Figure:
-    """Flow diagram: boundary condition -> grid -> transform -> propagation -> validation."""
+def _tint(colour: str, weight: float = 0.10) -> tuple[float, float, float]:
+    """Blend a palette colour towards white for a fill behind dark text."""
+    return tuple(1.0 - weight * (1.0 - channel) for channel in mpl.colors.to_rgb(colour))
+
+
+def plot_circuit_diagram(
+    circuit, fold: int = 26, scale: float = 0.6, style: str = "iqp"
+) -> plt.Figure:
+    """Draw an already-transpiled circuit as single- and two-qubit gates.
+
+    The circuit is drawn exactly as handed over: this function neither
+    transpiles nor decomposes, so a diagram cannot show a different gate set
+    from the one that was counted.  Qiskit sizes the canvas from the gate
+    count, and the result is wider than a journal column -- a two-qubit gate
+    drawn small enough to fit an 85 mm column is a gate nobody can read.  These
+    are vector appendix figures and are meant to be zoomed.
+
+    ``style`` is a Qiskit drawer style name; the default ``iqp`` is IBM's own
+    scheme, which is what a reader will recognise from Quantum Composer and
+    from every other Qiskit circuit they have seen.  The repository palette is
+    deliberately not used here: it is built for distinguishing data series, and
+    a circuit diagram has no data series to distinguish.
+
+    ``fold`` is the number of gate columns per drawn row.
+    """
+    from qiskit.visualization import circuit_drawer
+
+    return circuit_drawer(
+        circuit, output="mpl", fold=fold, scale=scale, style=style,
+        idle_wires=False, initial_state=False, plot_barriers=False,
+    )
+
+
+def plot_graphical_abstract(width_mm: float = 170.0, height_mm: float = 58.0) -> plt.Figure:
+    """The method as a comparison table: what changes, and what does not.
+
+    Every stage carries the equation that distinguishes the two boundary
+    topologies, so the diagram states the argument rather than naming its
+    steps.  Mathematics is set in Computer Modern through matplotlib's own
+    mathtext (``math_fontfamily="cm"``), which gives LaTeX typesetting without
+    making figure generation depend on a TeX installation being present.
+    Setting ``usetex=True`` on these texts would hand the typesetting to a real
+    LaTeX run instead, at the cost of that dependency.
+
+    Layout
+    ------
+    Stages are rows and the two boundary conditions are columns, so the reader
+    compares along a row rather than tracing a path.  The last two rows span
+    both columns because propagation and validation are shared: the table shape
+    itself carries the claim that the two runs differ in one column of inputs
+    and nothing else.  A flow chart cannot say that without arrows, and the
+    arrows were what made earlier versions of this figure noisy.
+
+    Chrome is deliberately thin -- tinted bands, hairline rules between rows and
+    one vertical divider, no boxes -- because in a table the alignment already
+    does the grouping that borders would otherwise have to do.
+    """
     figure, axis = plt.subplots(
-        figsize=(millimetres(width_mm), millimetres(46.0)), constrained_layout=True
+        figsize=(millimetres(width_mm), millimetres(height_mm)), constrained_layout=True
     )
     axis.set_axis_off()
     axis.set_xlim(0, 1)
     axis.set_ylim(0, 1)
 
-    rows = [
-        (0.72, "Dirichlet\n(hard wall)", "midpoint grid\n$x_j=(j+\\frac{1}{2})\\Delta x$",
-         "DST-II / QST\n(+2 ancillas)", PALETTE["dirichlet"]),
-        (0.28, "Periodic\n(ring)", "periodic grid\n$x_j=x_0+j\\Delta x$",
-         "DFT / QFT\n(no ancillas)", PALETTE["periodic"]),
-    ]
-    # Positions are chosen so the rightmost box stays inside the axes; a box
-    # centred much beyond 0.85 is clipped at this figure width.
-    x_positions = [0.07, 0.25, 0.43]
-    for y, boundary, grid_text, transform, colour in rows:
-        for x, text in zip(x_positions, (boundary, grid_text, transform)):
-            axis.text(
-                x, y, text, ha="center", va="center", fontsize=7.0, color=colour,
-                bbox={"boxstyle": "round,pad=0.3", "facecolor": "white",
-                      "edgecolor": colour, "linewidth": 1.0},
+    label_x = 0.128
+    body_x0 = 0.150
+    divider_x = 0.575
+    columns = {"dirichlet": (body_x0, divider_x - 0.010), "periodic": (divider_x + 0.010, 1.0)}
+    split_block = (0.360, 0.880)
+    rows = {
+        "boundary": (0.710, 0.880),
+        "grid": (0.560, 0.710),
+        "transform": (0.360, 0.560),
+        "propagate": (0.190, 0.340),
+        "validate": (0.020, 0.190),
+    }
+    ink = PALETTE["reference"]
+
+    def band(x0: float, x1: float, y0: float, y1: float, colour: str, weight: float) -> None:
+        axis.add_patch(
+            mpl.patches.Rectangle(
+                (x0, y0), x1 - x0, y1 - y0, facecolor=_tint(colour, weight),
+                edgecolor="none", zorder=0,
             )
-        for start, end in zip(x_positions, x_positions[1:]):
-            axis.annotate(
-                "", xy=(end - 0.068, y), xytext=(start + 0.068, y),
-                arrowprops={"arrowstyle": "-|>", "color": colour, "linewidth": 1.1},
-            )
-        axis.annotate(
-            "", xy=(0.565, 0.5), xytext=(x_positions[-1] + 0.068, y),
-            arrowprops={"arrowstyle": "-|>", "color": colour, "linewidth": 1.1},
         )
 
-    axis.text(
-        0.64, 0.5, "Strang split\npropagation", ha="center", va="center", fontsize=7.0,
-        color=PALETTE["reference"],
-        bbox={"boxstyle": "round,pad=0.3", "facecolor": "white",
-              "edgecolor": PALETTE["reference"], "linewidth": 1.0},
+    def rule(x0: float, x1: float, y: float, colour: str, width: float, alpha: float = 1.0) -> None:
+        axis.plot([x0, x1], [y, y], color=colour, linewidth=width, alpha=alpha,
+                  solid_capstyle="butt", zorder=1)
+
+    def cell(x0: float, x1: float, y: float, text: str, **kwargs: Any) -> None:
+        axis.text(0.5 * (x0 + x1), y, text, ha="center", va="center", zorder=2, **kwargs)
+
+    def row_label(name: str, y: float) -> None:
+        axis.text(
+            label_x, y, name, ha="right", va="center", fontsize=7.0,
+            color=PALETTE["floor"], fontstyle="italic", zorder=2,
+        )
+
+    # Column bands run the height of the three rows that actually differ; the
+    # shared rows take neutral ink so the eye reads them as common ground.
+    for key, (x0, x1) in columns.items():
+        band(x0, x1, *split_block, PALETTE[key], 0.09)
+    band(body_x0, 1.0, rows["validate"][0], rows["propagate"][1], ink, 0.07)
+
+    headers = {
+        "dirichlet": ("DIRICHLET", "hard wall"),
+        "periodic": ("PERIODIC", "ring"),
+    }
+    for key, (name, gloss) in headers.items():
+        x0, x1 = columns[key]
+        cell(x0, x1, 0.945, f"{name}  ·  {gloss}", fontsize=8.0,
+             color=PALETTE[key], fontweight="bold")
+        rule(x0, x1, 0.897, PALETTE[key], 1.2)
+
+    content = {
+        "boundary": (r"$\psi(0,t)=\psi(L,t)=0$", r"$\psi(x+L,t)=\psi(x,t)$"),
+        "grid": (r"$x_j=(j+\frac{1}{2})\,\Delta x$", r"$x_j=x_0+j\,\Delta x$"),
+    }
+    for name, (dirichlet_text, periodic_text) in content.items():
+        y0, y1 = rows[name]
+        centre = 0.5 * (y0 + y1)
+        row_label(name, centre)
+        for key, text in (("dirichlet", dirichlet_text), ("periodic", periodic_text)):
+            cell(*columns[key], centre, text, fontsize=9.5, color=ink, math_fontfamily="cm")
+
+    # The transform row carries the resource cost as well as the name, since the
+    # ancilla count is the practical price of the hard-wall boundary.
+    y0, y1 = rows["transform"]
+    row_label("transform", 0.5 * (y0 + y1))
+    for key, name, cost in (
+        ("dirichlet", r"$\mathcal{T}$ = DST-II / QST", "+2 ancillas"),
+        ("periodic", r"$\mathcal{T}$ = DFT / QFT", "no ancillas"),
+    ):
+        cell(*columns[key], y0 + 0.62 * (y1 - y0), name, fontsize=9.0,
+             color=ink, math_fontfamily="cm")
+        cell(*columns[key], y0 + 0.26 * (y1 - y0), cost, fontsize=7.0, color=PALETTE[key],
+             fontweight="semibold")
+
+    y0, y1 = rows["propagate"]
+    row_label("propagate", 0.5 * (y0 + y1))
+    cell(
+        body_x0, 1.0, 0.5 * (y0 + y1),
+        r"$U(\Delta t)=e^{-\frac{i\Delta t}{2\hbar}V}\;\mathcal{T}^{\dagger}\,"
+        r"e^{-\frac{i\hbar\Delta t}{2m}k^{2}}\,\mathcal{T}\;e^{-\frac{i\Delta t}{2\hbar}V}$",
+        fontsize=10.0, color=ink, math_fontfamily="cm",
     )
-    axis.annotate(
-        "", xy=(0.775, 0.5), xytext=(0.715, 0.5),
-        arrowprops={"arrowstyle": "-|>", "color": PALETTE["reference"], "linewidth": 1.1},
-    )
-    axis.text(
-        0.87, 0.5, "validation vs\nindependent\nreference", ha="center", va="center",
-        fontsize=7.0, color=PALETTE["reference"],
-        bbox={"boxstyle": "round,pad=0.3", "facecolor": "white",
-              "edgecolor": PALETTE["reference"], "linewidth": 1.0},
+
+    y0, y1 = rows["validate"]
+    row_label("validate", 0.5 * (y0 + y1))
+    cell(body_x0, 1.0, y0 + 0.66 * (y1 - y0),
+         r"$1-\left|\langle\psi_{\mathrm{ref}}|\psi\rangle\right|^{2}$",
+         fontsize=9.5, color=ink, math_fontfamily="cm")
+    cell(body_x0, 1.0, y0 + 0.22 * (y1 - y0), "against an independent reference solution",
+         fontsize=7.0, color=PALETTE["floor"])
+
+    # Hairlines between rows; the heavier rule marks where the columns merge.
+    for y in (rows["boundary"][0], rows["grid"][0], rows["validate"][1]):
+        rule(body_x0, 1.0, y, PALETTE["grid"], 0.7)
+    rule(body_x0, 1.0, split_block[0], ink, 1.0, alpha=0.55)
+    axis.plot(
+        [divider_x, divider_x], [split_block[0], split_block[1]],
+        color=PALETTE["grid"], linewidth=0.7, solid_capstyle="butt", zorder=1,
     )
     return figure

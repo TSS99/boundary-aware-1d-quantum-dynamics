@@ -1,0 +1,14 @@
+{
+  "caller": "qiskit_ibm_runtime~sampler.py",
+  "qiskit_version": "qiskit_ibm_runtime-0.48.0,qiskit-2.4.0*",
+  "timestamps": {
+    "created": "2026-08-06T08:43:41.186899Z",
+    "finished": "2026-08-06T08:45:15.381782Z",
+    "running": "2026-08-06T08:44:00.217403Z"
+  },
+  "usage": {
+    "qpu_charge_time_seconds": 43,
+    "status": "complete"
+  },
+  "circuits_execution_time_ns": 38990863360
+}
