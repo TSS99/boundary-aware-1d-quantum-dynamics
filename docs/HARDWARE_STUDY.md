@@ -106,6 +106,19 @@ two-qubit count, with the preparation-and-readout floor marked by a star;
 **(b)** ancilla postselection retention against two-qubit count, which is the
 error-detection rate on the two hard-wall systems.
 
+**`hardware_zne_density_grid`** — *Every benchmark, raw and mitigated.* Rows are
+systems, columns are step counts, matching `hardware_density_comparison`. Grey bars
+are the exact discrete solution, blue the ideal simulator, orange dashed the raw
+hardware, faint orange the noise-amplified runs and green the extrapolation. The
+dotted line is the uniform distribution, which is where depolarising noise drives
+everything — the faint curves should approach it in order, and where they do not the
+extrapolation has nothing to work with. Each panel carries its λ range and both
+distances.
+
+**`hardware_zne_densities`** — the four-panel pilot that preceded the grid, with
+global folding at λ = 1, 3, 5. Kept because its free-well panel is the clearest
+illustration of a saturated extrapolation failing visibly.
+
 **`<benchmark>_hardware_circuit`** — *What the device executed*, one figure per
 system, written by `python scripts/hardware_run.py circuits`. These are the
 transpiled, backend-mapped `r = 1` circuits including state preparation and
@@ -139,6 +152,125 @@ Vector PDF only, drawn in Qiskit's IBM (`iqp`) scheme.
 5. **A floor of roughly 0.04–0.05** sits under everything, from state
    preparation and readout, measured directly by the baseline circuits.
 
+## Error mitigation
+
+Two techniques were tried after the main campaign, in increasing order of cost.
+Both are reproducible from `scripts/hardware_run.py`.
+
+### Readout correction — tried, and mostly does not help
+
+`python scripts/hardware_run.py mitigate`, **0 QPU seconds**: the raw outcomes are
+re-fetched from the completed job and corrected in post-processing with a tensored
+assignment matrix built from the backend's per-qubit readout probabilities. The
+correction is applied on the joint register and only then is the ancilla
+postselection applied, so that a misread ancilla cannot discard a good shot before
+the correction can repair it.
+
+The prediction going in was that most of the 0.040–0.052 baseline floor was readout,
+and that correction would take it to about 0.015. **That was wrong.**
+
+| | raw | corrected | gain |
+|---|---|---|---|
+| baselines (mean) | 0.0452 | 0.0386 | 0.007 |
+| best case anywhere | — | — | 0.018 |
+| typical | — | — | 0.004–0.010 |
+
+Readout is roughly **15% of the floor**, not the bulk of it. Working back from the
+calibration, the baseline circuits carry ~1.5% gate error from five two-qubit gates
+and ~1.5–3% readout error, which sums to the observed ~4.5%. Ancilla retention
+barely moved (0.6453 → 0.6423), so misread ancillas were not costing good shots
+either. The result is recorded because it is the kind of obvious first move that
+looks like it should work, and knowing it does not saves the next person the effort.
+
+### Zero-noise extrapolation — works, and moves the crossover
+
+Qiskit Runtime offers ZNE only through the Estimator, which returns expectation
+values and therefore cannot postselect the ancillas. Since postselection discards a
+third to two thirds of shots as detected errors, the folding is done explicitly
+instead and the extrapolation is applied per density bin after postselection.
+
+**Noise amplification.** Individual `cz` gates are repeated in place. `cz` is its own
+inverse, so a fold is three copies where there was one and no basis inverse has to be
+constructed; folding the two-qubit gates alone is also what makes non-integer noise
+factors reachable. That matters, because global folding triples the circuit at its
+smallest step, which pushes the deeper benchmarks past the point where the returned
+distribution is indistinguishable from uniform. Noise factors are therefore chosen
+per circuit so that the most amplified copy stays under 600 two-qubit gates:
+
+| benchmark | r | 2q at λ=1 | λ range | 2q at λ_max |
+|---|---|---|---|---|
+| harmonic | 1, 2, 4, 8 | 33–111 | 1 → 5.00 | 165–555 |
+| free well | 1 | 111 | 1 → 5.00 | 555 |
+| free well | 2 | 203 | 1 → 2.95 | 599 |
+| free well | 4 | 373 | 1 → 1.61 | 599 |
+| tilted well | 1 | 111 | 1 → 5.00 | 555 |
+| tilted well | 2 | 229 | 1 → 2.62 | 601 |
+| tilted well | 4 | 455 | 1 → 1.32 | 599 |
+
+**The estimator matters more than the folding.** Fitting each density bin separately
+to an exponential needs two free parameters per bin against three noise factors, and
+where the lever arm is short — the deepest circuits reach only λ = 1.32 — those fits
+diverge. On this data they returned distances of 0.776 and 0.834 where the raw
+measurements were 0.142 and 0.184: confident nonsense. Depolarising noise acts on the
+whole distribution at once, so the faithful model has a single parameter: the
+deviation from uniform decays as `exp(-Gamma * lambda)` with its shape preserved.
+One constant fitted jointly across every bin and every noise factor is stable where
+per-bin fitting is not, and it turned four broken panels into four working ones from
+the same data.
+
+**Results**, `python scripts/hardware_run.py zne-grid` then `zne-grid-fetch`,
+**79 QPU seconds** for 30 circuits (10 benchmarks × 3 noise factors, 8192 shots):
+
+| benchmark | r | raw | mitigated | gain | amplification |
+|---|---|---|---|---|---|
+| harmonic | 1 | 0.052 | 0.030 | 0.021 | 1.10 |
+| harmonic | 2 | 0.128 | 0.069 | 0.059 | 1.15 |
+| harmonic | 4 | 0.094 | 0.041 | 0.052 | 1.25 |
+| harmonic | 8 | 0.083 | 0.043 | 0.040 | 1.25 |
+| free well | 1 | 0.108 | 0.076 | 0.032 | 1.34 |
+| free well | 2 | 0.142 | 0.065 | 0.077 | 2.65 |
+| free well | 4 | 0.184 | 0.157 | 0.028 | 2.50 |
+| tilted well | 1 | 0.171 | 0.048 | 0.123 | 1.59 |
+| tilted well | 2 | 0.233 | 0.032 | 0.201 | 2.37 |
+| tilted well | 4 | 0.367 | 0.150 | 0.217 | 4.00 (capped) |
+
+Every benchmark improved. Clipped negative mass is below 0.02 everywhere, so no
+result rests on repairing an unphysical extrapolation. The one qualification is
+tilted well `r = 4`, where the fit reached the amplification cap of 4.0: it wanted to
+extrapolate further than the data supports, so its 0.150 is a lower bound on the
+correction rather than a measurement.
+
+**The crossover moves.** Against exact diagonalisation of the same discrete
+Hamiltonian, for the tilted well:
+
+| | r=1 | r=2 | r=4 |
+|---|---|---|---|
+| raw hardware | 0.814 | 0.574 | 0.598 |
+| mitigated | 0.897 | 0.424 | 0.322 |
+| splitting error alone | 0.928 | 0.429 | 0.272 |
+
+Raw hardware bottoms out at `r = 2` and gets worse at `r = 4`. Mitigated, the error
+keeps falling through `r = 4` and lies almost on the splitting-error curve, meaning
+device error has been suppressed below the Trotter error. **Mitigation buys Trotter
+steps** — the optimum moves past `r = 4`, and the limit on how finely the interval
+may be split becomes the algorithm's rather than the device's. This is the sharpest
+result of the hardware study, and it is only visible because the same grid was
+measured raw and mitigated.
+
+### Cost of the whole campaign
+
+| job | purpose | QPU seconds |
+|---|---|---|
+| `d9q4ifclp7es73b4gnn0` | main campaign, 23 circuits | 43 |
+| `d9qo0t8pdb6s73e3qnsg` | ZNE pilot, global folding, 12 circuits | 32 |
+| `d9qou20pdb6s73e3sj50` | ZNE grid, partial folding, 30 circuits | 79 |
+| — | readout correction | 0 |
+| | **total** | **154** |
+
+Wall clock ran 94 s, 201 s and roughly 400 s respectively: QPU time is what is
+billed, and it is a fraction of the time spent waiting. Queue waits were 1.8–19 s
+because the backend was quiet.
+
 ## Caveats
 
 - `N = 8` is a toy grid: eight points, so the spatial discretisation is far from
@@ -150,8 +282,15 @@ Vector PDF only, drawn in Qiskit's IBM (`iqp`) scheme.
   asymptotic regime, which is why the harmonic splitting-error curve is not
   monotonic at small `r`. It does converge: statevector checks give
   4.0e-1 at `r = 1` down to 2.4e-4 at `r = 128`.
-- Readout mitigation was not applied; only twirling and dynamical decoupling.
-  M3 or TREX would lower the baseline floor.
+- The main campaign used only twirling and dynamical decoupling. Readout correction
+  and zero-noise extrapolation were applied afterwards and are reported separately
+  above; the headline numbers in the tables at the top of this document are the
+  unmitigated ones.
+- The device drifted measurably between jobs. The same free-well `r = 1` circuit
+  returned 0.092, 0.131 and 0.108 across three jobs on two days, and ancilla
+  retention moved 0.645 → 0.583 → 0.589. Every comparison in the mitigation section
+  is therefore within a single job, which is why the raw baseline is re-measured
+  alongside each mitigated run rather than taken from the main campaign.
 - Densities are the only observable used. Complex amplitudes are not directly
   measurable, and statevector fidelity is a simulator diagnostic, not a
   hardware-measurable quantity.

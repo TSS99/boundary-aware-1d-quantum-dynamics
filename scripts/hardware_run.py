@@ -737,6 +737,772 @@ def circuits(arguments: argparse.Namespace) -> int:
     return 0
 
 
+# Only circuits whose five-times-folded copy still carries signal. The r = 2
+# wells fold to 1015 and 1145 two-qubit gates, and the r = 4 echo control
+# already measured 0.663 at 849 gates -- close enough to the depolarised limit
+# that the folded points would be flat, and extrapolating a flat curve to zero
+# noise returns noise. Those circuits are out of reach of ZNE on this device,
+# which is a result about the device, not a reason to run them anyway.
+ZNE_PLAN = [
+    ("harmonic", 1), ("harmonic", 4),
+    ("infinite_well", 1), ("tilted_well", 1),
+]
+ZNE_FACTORS = (1, 3, 5)
+ZNE_SHOTS = 8192
+
+
+def _in_basis_inverse(isa: QuantumCircuit) -> QuantumCircuit:
+    """Invert an ISA circuit without leaving the device basis.
+
+    ``QuantumCircuit.inverse`` produces ``sxdg``, which Heron does not implement,
+    and re-transpiling to remove it would let the optimiser cancel the very
+    gates the folding is there to insert.  ``Z Rx(t) Z = Rx(-t)`` gives the
+    inverse of ``sx`` as ``rz(pi) sx rz(pi)``, so the whole inverse can be built
+    from the basis directly.  Global phase is irrelevant to probabilities.
+    """
+    inverse = isa.copy_empty_like()
+    for instruction in reversed(isa.data):
+        operation, qubits = instruction.operation, instruction.qubits
+        name = operation.name
+        if name == "rz":
+            inverse.rz(-operation.params[0], qubits[0])
+        elif name == "sx":
+            inverse.rz(np.pi, qubits[0])
+            inverse.sx(qubits[0])
+            inverse.rz(np.pi, qubits[0])
+        elif name == "x":
+            inverse.x(qubits[0])
+        elif name == "cz":
+            inverse.cz(qubits[0], qubits[1])
+        elif name == "barrier":
+            continue
+        else:
+            raise ValueError(f"Cannot invert {name!r} in the device basis.")
+    return inverse
+
+
+def _fold(isa: QuantumCircuit, factor: int) -> QuantumCircuit:
+    """Global folding: U -> U (U^dag U)^((factor-1)/2), measurements re-appended."""
+    if factor % 2 != 1 or factor < 1:
+        raise ValueError("Noise factor must be an odd positive integer.")
+    unitary = isa.copy_empty_like()
+    measurements = []
+    for instruction in isa.data:
+        if instruction.operation.name == "measure":
+            measurements.append(instruction)
+        else:
+            unitary.append(instruction)
+
+    folded = unitary.copy()
+    inverse = _in_basis_inverse(unitary)
+    for _ in range((factor - 1) // 2):
+        folded.barrier()
+        folded.compose(inverse, inplace=True)
+        folded.barrier()
+        folded.compose(unitary, inplace=True)
+    for instruction in measurements:
+        folded.append(instruction)
+    return folded
+
+
+ZNE_GRID_RECORD = OUTPUT / "zne_grid_job.json"
+# Keep the most amplified copy below the point where the returned distribution is
+# indistinguishable from uniform. The r = 4 echo control measured 0.663 at 849
+# two-qubit gates, so 600 is a conservative ceiling.
+ZNE_GATE_CEILING = 600
+
+
+def _fold_two_qubit(isa: QuantumCircuit, factor: float) -> tuple[QuantumCircuit, float]:
+    """Amplify noise by repeating individual ``cz`` gates.
+
+    ``cz`` is its own inverse, so a fold is simply three copies in place of one
+    and no basis inverse has to be constructed.  Folding the two-qubit gates
+    alone -- rather than the whole circuit -- is what makes non-integer noise
+    factors reachable, and they are needed here: global folding multiplies the
+    circuit by three at the smallest step, which pushes the deeper benchmarks
+    past the depolarising limit where extrapolation stops meaning anything.
+
+    Returns the folded circuit and the noise factor actually achieved, which is
+    quantised by the number of two-qubit gates available to fold.
+    """
+    positions = [i for i, inst in enumerate(isa.data) if inst.operation.name == "cz"]
+    count = len(positions)
+    if count == 0 or factor <= 1.0:
+        return isa.copy(), 1.0
+
+    folds = int(round(count * (factor - 1.0) / 2.0))
+    base, remainder = divmod(folds, count)
+    # Spread the leftover folds evenly rather than clustering them at one end,
+    # so the amplification is uniform across the circuit.
+    extra = {positions[int(i * count / remainder)] for i in range(remainder)} if remainder else set()
+
+    folded = isa.copy_empty_like()
+    for index, instruction in enumerate(isa.data):
+        if instruction.operation.name != "cz":
+            folded.append(instruction)
+            continue
+        repeats = 1 + 2 * (base + (1 if index in extra else 0))
+        for _ in range(repeats):
+            folded.append(instruction)
+    achieved = (count + 2 * folds) / count
+    return folded, achieved
+
+
+def _adaptive_factors(two_qubit: int) -> list[float]:
+    """Three noise factors whose largest copy stays under the gate ceiling."""
+    largest = min(5.0, ZNE_GATE_CEILING / max(two_qubit, 1))
+    if largest <= 1.05:
+        return [1.0, 1.0, 1.0]
+    return [1.0, 1.0 + (largest - 1.0) / 2.0, largest]
+
+
+def zne_grid(arguments: argparse.Namespace) -> int:
+    """Submit the full benchmark grid with per-circuit noise factors."""
+    config = load_config(ROOT / "configs" / "paper.yaml")
+    record = json.loads(JOB_RECORD.read_text(encoding="utf-8"))
+    service = connect()
+    backend = service.backend(record["backend"])
+    pass_manager = generate_preset_pass_manager(
+        optimization_level=3, backend=backend, seed_transpiler=config.circuits.seed
+    )
+
+    pubs, index = [], []
+    print(f"{'circuit':28s} {'2q':>5s} {'lambda':>7s} {'2q folded':>10s}")
+    for name, steps in PLAN.items():
+        for r in steps:
+            circuit, spec = logical_circuit(config, name, r, "propagate")
+            isa = pass_manager.run(circuit)
+            two_qubit = sum(1 for i in isa.data if i.operation.name == "cz")
+            for requested in _adaptive_factors(two_qubit):
+                folded, achieved = _fold_two_qubit(isa, requested)
+                folded_count = sum(1 for i in folded.data if i.operation.name == "cz")
+                print(f"{spec.label:28s} {two_qubit:5d} {achieved:7.2f} {folded_count:10d}")
+                pubs.append((folded,))
+                index.append([spec.label, name, r, achieved, folded_count])
+
+    if arguments.dry_run:
+        print(f"\n[hardware] dry run: {len(pubs)} circuits, nothing submitted")
+        return 0
+
+    from qiskit_ibm_runtime import SamplerV2
+
+    sampler = SamplerV2(mode=backend)
+    sampler.options.dynamical_decoupling.enable = True
+    sampler.options.dynamical_decoupling.sequence_type = "XY4"
+    sampler.options.twirling.enable_gates = True
+    sampler.options.twirling.enable_measure = True
+    sampler.options.default_shots = ZNE_SHOTS
+    sampler.options.environment.job_tags = [
+        STUDY_TAG, "zne", "partial-folding", "full-grid", f"backend-{backend.name}",
+    ]
+    job = sampler.run(pubs)
+    print(f"[hardware] submitted ZNE grid job {job.job_id()}")
+    ZNE_GRID_RECORD.write_text(
+        json.dumps(
+            {
+                "job_id": job.job_id(),
+                "backend": backend.name,
+                "shots": ZNE_SHOTS,
+                "index": index,
+                "submitted_utc": datetime.now(timezone.utc).isoformat(),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return 0
+
+
+def zne(arguments: argparse.Namespace) -> int:
+    """Zero-noise extrapolation by global gate folding on sampled densities.
+
+    Qiskit Runtime offers ZNE only through the Estimator, which returns
+    expectation values and therefore cannot postselect on the ancillas.  Since
+    postselection is doing real work here -- it discards a third to two thirds
+    of shots as detected errors -- the folding is done explicitly instead, and
+    the extrapolation is applied per density bin after postselection.
+
+    Extrapolated probabilities can come out negative; they are clipped and
+    renormalised, and the size of that repair is reported, because a large clip
+    means the extrapolation is not trustworthy.
+    """
+    config = load_config(ROOT / "configs" / "paper.yaml")
+    record = json.loads(JOB_RECORD.read_text(encoding="utf-8"))
+    service = connect()
+    backend = service.backend(record["backend"])
+    pass_manager = generate_preset_pass_manager(
+        optimization_level=3, backend=backend, seed_transpiler=config.circuits.seed
+    )
+
+    pubs, index = [], []
+    for name, steps in ZNE_PLAN:
+        circuit, spec = logical_circuit(config, name, steps, "propagate")
+        isa = pass_manager.run(circuit)
+        for factor in ZNE_FACTORS:
+            folded = _fold(isa, factor)
+            two_qubit = sum(
+                count for gate, count in folded.count_ops().items() if gate == "cz"
+            )
+            print(f"  {spec.label:28s} lambda={factor}  2q={two_qubit:5d} depth={folded.depth():5d}")
+            pubs.append((folded,))
+            index.append((spec.label, name, steps, factor, two_qubit))
+
+    if arguments.dry_run:
+        print("[hardware] dry run; nothing submitted")
+        return 0
+
+    from qiskit_ibm_runtime import SamplerV2
+
+    sampler = SamplerV2(mode=backend)
+    sampler.options.dynamical_decoupling.enable = True
+    sampler.options.dynamical_decoupling.sequence_type = "XY4"
+    sampler.options.twirling.enable_gates = True
+    sampler.options.twirling.enable_measure = True
+    sampler.options.default_shots = ZNE_SHOTS
+    sampler.options.environment.job_tags = [
+        STUDY_TAG, "zne", "gate-folding", f"backend-{backend.name}",
+    ]
+    job = sampler.run(pubs)
+    print(f"[hardware] submitted ZNE job {job.job_id()}")
+    (OUTPUT / "zne_job.json").write_text(
+        json.dumps(
+            {
+                "job_id": job.job_id(),
+                "backend": backend.name,
+                "factors": list(ZNE_FACTORS),
+                "shots": ZNE_SHOTS,
+                "index": index,
+                "submitted_utc": datetime.now(timezone.utc).isoformat(),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return 0
+
+
+MAX_AMPLIFICATION = 4.0
+
+
+def _extrapolate(factors: np.ndarray, stack: np.ndarray) -> tuple[np.ndarray, float, float]:
+    """Undo global depolarisation, fitting one decay constant across all bins.
+
+    Fitting each bin separately needs two free parameters per bin against three
+    noise factors, and when the lever arm is short -- the deepest circuits reach
+    only lambda = 1.3 before saturating -- those fits diverge and return
+    confident nonsense.  Depolarising noise acts on the whole distribution at
+    once, so the physically faithful model has a single parameter: the deviation
+    from uniform shrinks as ``exp(-Gamma * lambda)`` while its *shape* is
+    preserved.  That is one constant fitted from every bin and every noise
+    factor jointly, which is stable where per-bin fitting is not.
+
+    Returns the extrapolated density, the amplification applied, and the
+    clipped negative mass.  An amplification at the cap means the fit wanted to
+    extrapolate further than the data can support and the result is not to be
+    trusted.
+    """
+    uniform = 1.0 / stack.shape[1]
+    deviations = stack - uniform
+    norms = np.linalg.norm(deviations, axis=1)
+    if np.any(norms <= 0):
+        return stack[0], 1.0, 0.0
+
+    # ln||p_lambda - u|| = ln||p_0 - u|| - Gamma * lambda
+    slope, intercept = np.polyfit(factors, np.log(norms), deg=1)
+    amplification = float(np.exp(intercept) / norms[0])
+    amplification = float(np.clip(amplification, 1.0, MAX_AMPLIFICATION))
+
+    values = uniform + deviations[0] * amplification
+    clipped = float(np.abs(values[values < 0]).sum())
+    values = np.clip(values, 0.0, None)
+    return values / values.sum(), amplification, clipped
+
+
+def zne_grid_fetch(arguments: argparse.Namespace) -> int:
+    """Analyse the full ZNE grid and draw it in the density-comparison layout."""
+    import pandas as pd
+
+    config = load_config(ROOT / "configs" / "paper.yaml")
+    record = json.loads(ZNE_GRID_RECORD.read_text(encoding="utf-8"))
+    service = connect()
+    job = service.job(record["job_id"])
+    status = str(job.status())
+    print(f"[hardware] ZNE grid job {record['job_id']} status={status}")
+    if status != "DONE":
+        print("[hardware] not finished yet; re-run later.")
+        return 1
+
+    result = job.result()
+    collected: dict[str, list] = {}
+    specs: dict[str, Any] = {}
+    for pub_result, (label, name, steps, factor, folded_count) in zip(result, record["index"]):
+        circuit, spec = logical_circuit(config, name, steps, "propagate")
+        specs[label] = (circuit, spec)
+        counts = pub_result.data.position.get_counts()
+        total = sum(counts.values())
+        retention = 1.0
+        if hasattr(pub_result.data, "ancilla"):
+            kept: dict[str, int] = {}
+            for position_bits, ancilla_bits in zip(
+                pub_result.data.position.get_bitstrings(),
+                pub_result.data.ancilla.get_bitstrings(),
+            ):
+                if set(ancilla_bits) == {"0"}:
+                    kept[position_bits] = kept.get(position_bits, 0) + 1
+            retention = sum(kept.values()) / total
+            counts = kept or counts
+        density = np.zeros(2 ** spec.n_data_qubits)
+        for bitstring, count in counts.items():
+            density[int(bitstring, 2)] += count
+        collected.setdefault(label, []).append((factor, density / density.sum(), retention))
+
+    rows, curves = [], {}
+    for label, entries in collected.items():
+        circuit, spec = specs[label]
+        entries.sort(key=lambda item: item[0])
+        factors = np.array([item[0] for item in entries])
+        stack = np.array([item[1] for item in entries])
+        extrapolated, amplification, clipped = _extrapolate(factors, stack)
+        ideal = ideal_density(circuit, spec)
+        rows.append(
+            {
+                "label": label,
+                "benchmark": spec.benchmark,
+                "n_steps": spec.n_steps,
+                "lambda_max": float(factors.max()),
+                "tvd_raw": total_variation(stack[0], ideal),
+                "tvd_zne": total_variation(extrapolated, ideal),
+                "tvd_raw_vs_exact": total_variation(stack[0], exact_density(config, spec.benchmark)),
+                "tvd_zne_vs_exact": total_variation(extrapolated, exact_density(config, spec.benchmark)),
+                "tvd_ideal_vs_exact": total_variation(ideal, exact_density(config, spec.benchmark)),
+                "amplification": amplification,
+                "clipped_negative_mass": clipped,
+                "retention": entries[0][2],
+            }
+        )
+        curves[label] = {
+            "exact": exact_density(config, spec.benchmark),
+            "ideal": ideal,
+            "zne": extrapolated,
+            "raw": stack[0],
+            "amplified": stack[1:],
+            "factors": factors,
+        }
+
+    frame = pd.DataFrame(rows)
+    frame["improvement"] = frame.tvd_raw - frame.tvd_zne
+    frame = frame.sort_values(["benchmark", "n_steps"])
+    frame.to_csv(OUTPUT / "zne_grid_comparison.csv", index=False)
+    print(frame.round(4).to_string(index=False))
+    _plot_zne_grid(frame, curves)
+    metrics = job.metrics()
+    print(f"\nQPU seconds charged: {metrics.get('usage', {}).get('qpu_charge_time_seconds')}")
+    return 0
+
+
+def _plot_zne_grid(frame, curves: dict) -> None:
+    """Rows are systems, columns are step counts -- the density-comparison layout."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from boundary_aware_dynamics import plotting
+
+    plotting.apply_style("publication")
+    palette = plotting.PALETTE
+    titles = {
+        "harmonic": "harmonic (QFT)",
+        "infinite_well": "free well (QST)",
+        "tilted_well": "tilted well (QST)",
+    }
+    widest = max(len(steps) for steps in PLAN.values())
+    figure, axes = plt.subplots(
+        len(PLAN), widest,
+        figsize=(plotting.millimetres(170.0), plotting.millimetres(112.0)),
+        constrained_layout=True, sharex=True,
+    )
+    for row_index, name in enumerate(PLAN):
+        panel = frame[frame.benchmark == name].sort_values("n_steps")
+        for column_index in range(widest):
+            axis = axes[row_index, column_index]
+            if column_index >= len(panel):
+                axis.set_axis_off()
+                continue
+            entry = panel.iloc[column_index]
+            data = curves[entry.label]
+            centres = np.arange(len(data["exact"]))
+            uniform = 1.0 / len(data["exact"])
+
+            axis.bar(centres, data["exact"], width=0.85, color=palette["grid"],
+                     edgecolor="none", label="exact (discrete)")
+            axis.axhline(uniform, color=palette["floor"], linewidth=0.7, linestyle=":")
+            for amplified in data["amplified"]:
+                axis.step(centres, amplified, where="mid", color=palette["periodic"],
+                          linewidth=0.9, alpha=0.35,
+                          label="hardware, amplified"
+                          if amplified is data["amplified"][0] else None)
+            axis.step(centres, data["raw"], where="mid", color=palette["periodic"],
+                      linewidth=1.4, linestyle="--", label="hardware, raw")
+            axis.step(centres, data["zne"], where="mid", color=palette["third"],
+                      linewidth=1.6, label="ZNE extrapolated")
+            axis.step(centres, data["ideal"], where="mid", color=palette["dirichlet"],
+                      linewidth=1.4, label="ideal simulator")
+
+            unreliable = entry.clipped_negative_mass > 0.5
+            axis.set_title(
+                rf"$r={int(entry.n_steps)}$,  $\lambda_{{\max}}={entry.lambda_max:.2f}$",
+                fontsize=matplotlib.rcParams["font.size"] - 1.0,
+            )
+            axis.text(
+                0.03, 0.97,
+                f"raw {entry.tvd_raw:.3f}\nZNE {entry.tvd_zne:.3f}"
+                + ("\nunreliable" if unreliable else ""),
+                transform=axis.transAxes, ha="left", va="top",
+                fontsize=matplotlib.rcParams["font.size"] - 2.5,
+                color=palette["periodic"] if unreliable else palette["reference"],
+            )
+            top = max(data["exact"].max(), data["ideal"].max(),
+                      data["zne"].max(), data["raw"].max())
+            axis.set_ylim(0.0, top * 1.6)
+            axis.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(nbins=3))
+            axis.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+            axis.grid(True, axis="y", color=palette["grid"], linewidth=0.4, alpha=0.7)
+            axis.set_axisbelow(True)
+            below = [len(frame[frame.benchmark == other]) for other in list(PLAN)[row_index + 1:]]
+            if all(column_index >= count for count in below):
+                axis.set_xlabel("grid point $j$")
+                axis.tick_params(labelbottom=True)
+        axes[row_index, 0].set_ylabel(f"{titles[name]}\nprobability")
+    for axis, label in zip(axes[:, 0], ("(a)", "(b)", "(c)")):
+        axis.text(-0.34, 1.10, label, transform=axis.transAxes,
+                  fontsize=matplotlib.rcParams["font.size"] + 1, fontweight="bold")
+    handles, legend_labels = axes[0, 0].get_legend_handles_labels()
+    figure.legend(handles, legend_labels, loc="outside lower center", ncol=5,
+                  columnspacing=1.2, fontsize=matplotlib.rcParams["font.size"] - 1.5)
+    plotting.save_figure(figure, "hardware_zne_density_grid", OUTPUT / "figures")
+    plt.close(figure)
+    print(f"[hardware] wrote {OUTPUT / 'figures' / 'hardware_zne_density_grid.pdf'}")
+
+
+def _plot_zne_densities(frame, curves: dict) -> None:
+    """Densities before and after extrapolation, with the folded runs shown.
+
+    The noise-amplified curves are drawn faintly because they are the evidence
+    for the extrapolation: each one should sit further towards the uniform line
+    than the last, and the extrapolated curve should sit on the other side of
+    the raw measurement from them. Where that ordering fails, the extrapolation
+    is not supported by its own data, and the panel says so.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from boundary_aware_dynamics import plotting
+
+    plotting.apply_style("publication")
+    palette = plotting.PALETTE
+    titles = {
+        "harmonic": "harmonic (QFT)",
+        "infinite_well": "free well (QST)",
+        "tilted_well": "tilted well (QST)",
+    }
+
+    ordered = list(curves)
+    figure, axes = plt.subplots(
+        1, len(ordered),
+        figsize=(plotting.millimetres(170.0), plotting.millimetres(62.0)),
+        constrained_layout=True,
+    )
+    for axis, label in zip(np.atleast_1d(axes), ordered):
+        data = curves[label]
+        row = frame[frame.label == label].iloc[0]
+        centres = np.arange(len(data["exact"]))
+        uniform = 1.0 / len(data["exact"])
+
+        axis.bar(centres, data["exact"], width=0.85, color=palette["grid"],
+                 edgecolor="none", label="exact (discrete)")
+        axis.axhline(uniform, color=palette["floor"], linewidth=0.7, linestyle=":")
+        for factor, alpha in ((3, 0.45), (5, 0.25)):
+            axis.step(centres, data[f"lambda{factor}"], where="mid",
+                      color=palette["periodic"], linewidth=1.0, alpha=alpha,
+                      label=r"hardware, $\lambda=3,\,5$" if factor == 3 else None)
+        axis.step(centres, data["lambda1"], where="mid", color=palette["periodic"],
+                  linewidth=1.4, linestyle="--", label=r"hardware, $\lambda=1$")
+        axis.step(centres, data["zne"], where="mid", color=palette["third"],
+                  linewidth=1.6, label="ZNE extrapolated")
+        axis.step(centres, data["ideal"], where="mid", color=palette["dirichlet"],
+                  linewidth=1.4, label="ideal simulator")
+
+        unreliable = row.clipped_negative_mass > 0.5
+        axis.set_title(
+            f"{titles[row.benchmark]}, $r={int(row.n_steps)}$",
+            fontsize=matplotlib.rcParams["font.size"] - 0.5,
+        )
+        axis.text(
+            0.03, 0.97,
+            f"raw {row.tvd_lambda1:.3f}\nZNE {row.tvd_zne:.3f}"
+            + ("\nextrapolation\nunreliable" if unreliable else ""),
+            transform=axis.transAxes, ha="left", va="top",
+            fontsize=matplotlib.rcParams["font.size"] - 2.0,
+            color=palette["reference"] if not unreliable else palette["periodic"],
+        )
+        top = max(max(data["exact"]), max(data["ideal"]), max(data["zne"]),
+                  max(data["lambda1"]))
+        axis.set_ylim(0.0, top * 1.55)
+        axis.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(nbins=3))
+        # Grid points are integers; a tick at j = 2.5 labels nothing that exists.
+        axis.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+        axis.set_xlabel("grid point $j$")
+        axis.grid(True, axis="y", color=palette["grid"], linewidth=0.4, alpha=0.7)
+        axis.set_axisbelow(True)
+    np.atleast_1d(axes)[0].set_ylabel("probability")
+    for axis, label in zip(np.atleast_1d(axes), ("(a)", "(b)", "(c)", "(d)")):
+        axis.text(-0.20, 1.08, label, transform=axis.transAxes,
+                  fontsize=matplotlib.rcParams["font.size"] + 1, fontweight="bold")
+    handles, legend_labels = np.atleast_1d(axes)[0].get_legend_handles_labels()
+    figure.legend(handles, legend_labels, loc="outside lower center", ncol=5,
+                  columnspacing=1.2, fontsize=matplotlib.rcParams["font.size"] - 1.5)
+    plotting.save_figure(figure, "hardware_zne_densities", OUTPUT / "figures")
+    plt.close(figure)
+    print(f"[hardware] wrote {OUTPUT / 'figures' / 'hardware_zne_densities.pdf'}")
+
+
+def zne_fetch(arguments: argparse.Namespace) -> int:
+    """Extrapolate the folded runs to zero noise and compare against the ideal."""
+    import pandas as pd
+
+    config = load_config(ROOT / "configs" / "paper.yaml")
+    record = json.loads((OUTPUT / "zne_job.json").read_text(encoding="utf-8"))
+    service = connect()
+    job = service.job(record["job_id"])
+    status = str(job.status())
+    print(f"[hardware] ZNE job {record['job_id']} status={status}")
+    if status != "DONE":
+        print("[hardware] not finished yet; re-run zne-fetch later.")
+        return 1
+
+    result = job.result()
+    measured: dict[tuple[str, int], np.ndarray] = {}
+    retention: dict[tuple[str, int], float] = {}
+    specs: dict[str, Any] = {}
+    for pub_result, (label, name, steps, factor, two_qubit) in zip(result, record["index"]):
+        circuit, spec = logical_circuit(config, name, steps, "propagate")
+        specs[label] = (circuit, spec, two_qubit)
+        counts = pub_result.data.position.get_counts()
+        total = sum(counts.values())
+        if hasattr(pub_result.data, "ancilla"):
+            kept: dict[str, int] = {}
+            for position_bits, ancilla_bits in zip(
+                pub_result.data.position.get_bitstrings(),
+                pub_result.data.ancilla.get_bitstrings(),
+            ):
+                if set(ancilla_bits) == {"0"}:
+                    kept[position_bits] = kept.get(position_bits, 0) + 1
+            retention[(label, factor)] = sum(kept.values()) / total
+            counts = kept or counts
+        else:
+            retention[(label, factor)] = 1.0
+        density = np.zeros(2 ** spec.n_data_qubits)
+        for bitstring, count in counts.items():
+            density[int(bitstring, 2)] += count
+        measured[(label, factor)] = density / density.sum()
+
+    factors = np.array(record["factors"], dtype=float)
+    rows, curves = [], {}
+    for label, (circuit, spec, two_qubit) in specs.items():
+        from scipy.optimize import curve_fit
+
+        stack = np.array([measured[(label, int(f))] for f in factors])
+        uniform = 1.0 / stack.shape[1]
+
+        def repair(values: np.ndarray) -> tuple[np.ndarray, float]:
+            clipped = float(np.abs(values[values < 0]).sum())
+            values = np.clip(values, 0.0, None)
+            return values / values.sum(), clipped
+
+        # Depolarising noise drives a distribution towards uniform, so the
+        # physically motivated model fixes that asymptote and fits the approach
+        # to it. Two parameters against three noise factors, which keeps the fit
+        # over-determined; a free-asymptote exponential would be exactly
+        # determined and unstable. Linear and quadratic are recorded alongside
+        # it because the model must be chosen before seeing the answer -- the
+        # ideal density is known here only because this is a benchmark.
+        exponential = np.zeros(stack.shape[1])
+        for bin_index in range(stack.shape[1]):
+            samples = stack[:, bin_index]
+            try:
+                (amplitude, rate), _ = curve_fit(
+                    lambda lam, a, k: uniform + a * np.exp(-k * lam),
+                    factors, samples, p0=[samples[0] - uniform, 0.2], maxfev=20000,
+                )
+                exponential[bin_index] = uniform + amplitude
+            except Exception:
+                exponential[bin_index] = samples[0]
+
+        extrapolated, negative_mass = repair(exponential)
+        linear, _ = repair(np.polyfit(factors, stack, deg=1)[1])
+        quadratic, _ = repair(np.polyval(np.polyfit(factors, stack, deg=2), 0.0))
+        ideal = ideal_density(circuit, spec)
+        rows.append(
+            {
+                "label": label,
+                "benchmark": spec.benchmark,
+                "n_steps": spec.n_steps,
+                "two_qubit_gates": two_qubit,
+                "tvd_lambda1": total_variation(measured[(label, 1)], ideal),
+                "tvd_lambda3": total_variation(measured[(label, 3)], ideal),
+                "tvd_lambda5": total_variation(measured[(label, 5)], ideal),
+                "tvd_zne": total_variation(extrapolated, ideal),
+                "tvd_zne_linear": total_variation(linear, ideal),
+                "tvd_zne_quadratic": total_variation(quadratic, ideal),
+                "clipped_negative_mass": negative_mass,
+                "retention_lambda1": retention[(label, 1)],
+            }
+        )
+        curves[label] = {
+            "exact": exact_density(config, spec.benchmark),
+            "ideal": ideal,
+            "zne": extrapolated,
+            **{f"lambda{int(f)}": measured[(label, int(f))] for f in factors},
+        }
+    frame = pd.DataFrame(rows)
+    frame["improvement"] = frame.tvd_lambda1 - frame.tvd_zne
+    frame.to_csv(OUTPUT / "zne_comparison.csv", index=False)
+    (OUTPUT / "zne_densities.json").write_text(
+        json.dumps({label: {k: v.tolist() for k, v in value.items()}
+                    for label, value in curves.items()}, indent=2),
+        encoding="utf-8",
+    )
+    _plot_zne_densities(frame, curves)
+    print(frame.round(4).to_string(index=False))
+    metrics = job.metrics()
+    print(f"\nQPU seconds charged: {metrics.get('usage', {}).get('qpu_charge_time_seconds')}")
+    return 0
+
+
+def mitigate(arguments: argparse.Namespace) -> int:
+    """Apply a tensored readout correction to the counts already returned.
+
+    Costs no QPU time: the raw per-shot outcomes are re-fetched from the job and
+    corrected in post-processing, using the per-qubit assignment probabilities
+    the backend reports.  The correction is applied on the *joint* register --
+    position bits together with ancilla bits -- and only then is the ancilla
+    postselection applied, because a misread ancilla otherwise discards a good
+    shot before the correction can repair it.
+
+    The baseline circuits are the check on whether this is trustworthy: their
+    ideal output is known exactly and their gate content is negligible, so
+    almost all of their error is readout.  If correction does not move them, the
+    calibration has drifted too far from the time of the run to be applied.
+    """
+    import pandas as pd
+    from scipy.optimize import nnls
+
+    config = load_config(ROOT / "configs" / "paper.yaml")
+    record = json.loads(JOB_RECORD.read_text(encoding="utf-8"))
+    items = {spec.label: (circuit, spec) for circuit, spec in build_all(config)}
+
+    service = connect()
+    job = service.job(record["job_id"])
+    if str(job.status()) != "DONE":
+        raise SystemExit("Job is not finished.")
+    backend = service.backend(record["backend"])
+    properties = backend.properties()
+    pass_manager = generate_preset_pass_manager(
+        optimization_level=3, backend=backend, seed_transpiler=config.circuits.seed
+    )
+
+    def assignment(physical: int) -> tuple[float, float]:
+        """Return (P(1|0), P(0|1)) for one physical qubit."""
+        prep0 = properties.qubit_property(physical, "prob_meas1_prep0")[0]
+        prep1 = properties.qubit_property(physical, "prob_meas0_prep1")[0]
+        return float(prep0), float(prep1)
+
+    result = job.result()
+    rows = []
+    for pub_result, stored in zip(result, record["specs"]):
+        label = stored["label"]
+        circuit, spec = items[label]
+        isa = pass_manager.run(circuit)
+        layout = isa.layout.final_index_layout()
+
+        data_qubits = (
+            list(range(spec.n_data_qubits))
+            if spec.boundary == "periodic"
+            else list(range(1, spec.n_data_qubits + 1))
+        )
+        ancillas = [q for q in range(spec.n_qubits) if q not in data_qubits]
+        # Classical bit k of each register was written by a known virtual qubit,
+        # which the layout maps to the physical qubit whose calibration applies.
+        measured = [layout[v] for v in data_qubits] + [layout[v] for v in ancillas]
+        n_bits = len(measured)
+
+        position_shots = pub_result.data.position.get_bitstrings()
+        ancilla_shots = (
+            pub_result.data.ancilla.get_bitstrings()
+            if hasattr(pub_result.data, "ancilla") else ["" for _ in position_shots]
+        )
+        observed = np.zeros(2 ** n_bits)
+        for position_bits, ancilla_bits in zip(position_shots, ancilla_shots):
+            joint = position_bits[::-1] + ancilla_bits[::-1]  # bit k at index k
+            observed[sum(int(joint[k]) << k for k in range(n_bits))] += 1
+        shots = observed.sum()
+        observed /= shots
+
+        matrix = np.ones((2 ** n_bits, 2 ** n_bits))
+        for k, physical in enumerate(measured):
+            p10, p01 = assignment(physical)
+            for obs in range(2 ** n_bits):
+                for true in range(2 ** n_bits):
+                    obs_bit, true_bit = (obs >> k) & 1, (true >> k) & 1
+                    if true_bit == 0:
+                        matrix[obs, true] *= p10 if obs_bit else 1.0 - p10
+                    else:
+                        matrix[obs, true] *= 1.0 - p01 if obs_bit else p01
+        corrected, _ = nnls(matrix, observed)
+        corrected = corrected / corrected.sum()
+
+        def collapse(distribution: np.ndarray) -> tuple[np.ndarray, float]:
+            density = np.zeros(2 ** spec.n_data_qubits)
+            kept = 0.0
+            for index, weight in enumerate(distribution):
+                if any((index >> k) & 1 for k in range(len(data_qubits), n_bits)):
+                    continue
+                density[index & (2 ** spec.n_data_qubits - 1)] += weight
+                kept += weight
+            return (density / density.sum() if density.sum() else density), kept
+
+        raw_density, raw_kept = collapse(observed)
+        fixed_density, fixed_kept = collapse(corrected)
+        ideal = ideal_density(circuit, spec)
+        rows.append(
+            {
+                "label": label,
+                "group": spec.group,
+                "benchmark": spec.benchmark,
+                "n_steps": spec.n_steps,
+                "two_qubit_gates": stored["two_qubit_gates"],
+                "tvd_raw": total_variation(raw_density, ideal),
+                "tvd_readout_corrected": total_variation(fixed_density, ideal),
+                "retention_raw": raw_kept,
+                "retention_corrected": fixed_kept,
+            }
+        )
+
+    frame = pd.DataFrame(rows)
+    frame["improvement"] = frame.tvd_raw - frame.tvd_readout_corrected
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(OUTPUT / "readout_mitigated.csv", index=False)
+    print(frame.round(4).to_string(index=False))
+    baselines = frame[frame.group == "baseline"]
+    print(
+        f"\nbaseline check: {baselines.tvd_raw.mean():.4f} -> "
+        f"{baselines.tvd_readout_corrected.mean():.4f} "
+        f"(these circuits are almost pure readout error)"
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -754,6 +1520,27 @@ def main() -> int:
     circuits_parser.add_argument("--steps", type=int, default=1)
     circuits_parser.add_argument("--fold", type=int, default=30)
     circuits_parser.set_defaults(handler=circuits)
+
+    mitigate_parser = sub.add_parser(
+        "mitigate", help="readout-correct the returned counts; costs no QPU time"
+    )
+    mitigate_parser.set_defaults(handler=mitigate)
+
+    zne_parser = sub.add_parser("zne", help="submit gate-folded circuits for extrapolation")
+    zne_parser.add_argument("--dry-run", action="store_true")
+    zne_parser.set_defaults(handler=zne)
+
+    grid_parser = sub.add_parser(
+        "zne-grid", help="submit the full benchmark grid with adaptive noise factors"
+    )
+    grid_parser.add_argument("--dry-run", action="store_true")
+    grid_parser.set_defaults(handler=zne_grid)
+
+    grid_fetch_parser = sub.add_parser("zne-grid-fetch", help="analyse and plot the ZNE grid")
+    grid_fetch_parser.set_defaults(handler=zne_grid_fetch)
+
+    zne_fetch_parser = sub.add_parser("zne-fetch", help="extrapolate and compare the ZNE job")
+    zne_fetch_parser.set_defaults(handler=zne_fetch)
 
     arguments = parser.parse_args()
     return arguments.handler(arguments)
